@@ -1,47 +1,8 @@
 {% extends "base.html" %}
 {% import "macros.html" as ui %}
-{% block title %}Your account{% if password_login %}
-<section class="settings-section">
-  <header><h2>Password</h2><p>{% if has_password %}For signing in with your email.{% else %}You sign in with single sign-on. Set a password to also sign in with your email.{% endif %}</p></header>
-  <form class="stack" method="post" action="/-/profile/password">
-    {% if has_password %}<label class="field"><span>Current password</span><input type="password" name="current" required autocomplete="current-password"></label>{% endif %}
-    <div class="row2">
-      <label class="field"><span>New password</span><input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
-      <label class="field"><span>Repeat it</span><input type="password" name="password2" required minlength="10" autocomplete="new-password"></label>
-    </div>
-    <div><button class="btn confirm" type="submit">Save password</button></div>
-  </form>
-</section>
-{% endif %}
-{% endblock %}
-{% block on_profile %}on{% if password_login %}
-<section class="settings-section">
-  <header><h2>Password</h2><p>{% if has_password %}For signing in with your email.{% else %}You sign in with single sign-on. Set a password to also sign in with your email.{% endif %}</p></header>
-  <form class="stack" method="post" action="/-/profile/password">
-    {% if has_password %}<label class="field"><span>Current password</span><input type="password" name="current" required autocomplete="current-password"></label>{% endif %}
-    <div class="row2">
-      <label class="field"><span>New password</span><input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
-      <label class="field"><span>Repeat it</span><input type="password" name="password2" required minlength="10" autocomplete="new-password"></label>
-    </div>
-    <div><button class="btn confirm" type="submit">Save password</button></div>
-  </form>
-</section>
-{% endif %}
-{% endblock %}
-{% block crumbs %}<span class="here">Your account</span>{% if password_login %}
-<section class="settings-section">
-  <header><h2>Password</h2><p>{% if has_password %}For signing in with your email.{% else %}You sign in with single sign-on. Set a password to also sign in with your email.{% endif %}</p></header>
-  <form class="stack" method="post" action="/-/profile/password">
-    {% if has_password %}<label class="field"><span>Current password</span><input type="password" name="current" required autocomplete="current-password"></label>{% endif %}
-    <div class="row2">
-      <label class="field"><span>New password</span><input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
-      <label class="field"><span>Repeat it</span><input type="password" name="password2" required minlength="10" autocomplete="new-password"></label>
-    </div>
-    <div><button class="btn confirm" type="submit">Save password</button></div>
-  </form>
-</section>
-{% endif %}
-{% endblock %}
+{% block title %}Your account{% endblock %}
+{% block on_profile %}on{% endblock %}
+{% block crumbs %}<span class="here">Your account</span>{% endblock %}
 {% block content %}
 <div class="page-head"><div><h1>Your account</h1><p class="lead">Signed in as {{ user.email }}.</p></div></div>
 {% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}

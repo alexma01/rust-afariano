@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-11-01
+
+### Fixed
+
+- The account page (`/-/profile`) repeated its password form inside the page
+  title, the sidebar and the breadcrumbs, breaking the layout.
+- Long clone URLs no longer overflow the settings column.
+
 ## [0.1.1] - 2026-11-01
 
 ### Fixed
@@ -42,5 +50,6 @@ First public release.
   clones of a 216 MB repository at once.
 - Container image, `docker-compose.yml`, and prebuilt runner binaries.
 
+[0.1.2]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.2
 [0.1.1]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.1
 [0.1.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.0

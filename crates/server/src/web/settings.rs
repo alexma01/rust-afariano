@@ -516,3 +516,37 @@ pub async fn delete_repo(
     tracing::warn!(repo = %repo.path(), user = %user.email, "repository deleted");
     Ok(Redirect::to("/").into_response())
 }
+
+#[cfg(test)]
+mod tests {
+    use askama::Template;
+
+    use super::ProfilePage;
+    use crate::models::User;
+
+    /// Regression: the password section once leaked into every block of the
+    /// template (page title, sidebar link class, breadcrumbs).
+    #[test]
+    fn profile_page_renders_each_section_once() {
+        for has_password in [true, false] {
+            let html = ProfilePage {
+                user: User { id: 1, email: "ana@example.com".into(), name: String::new(), is_admin: true },
+                keys: Vec::new(),
+                tokens: Vec::new(),
+                new_token: String::new(),
+                error: String::new(),
+                notice: String::new(),
+                has_password,
+                password_login: true,
+                ssh_example: "ssh://git@host:2222/ns/repo.git".into(),
+                http_example: "https://host/ns/repo.git".into(),
+            }
+            .render()
+            .unwrap();
+            assert_eq!(html.matches("<h2>Password</h2>").count(), 1);
+            assert!(html.contains("<title>Your account · rust-afariano</title>"));
+            assert!(html.contains(r#"<a href="/-/profile" class="on">"#));
+            assert_eq!(html.matches("action=\"/-/profile/password\"").count(), 1);
+        }
+    }
+}
