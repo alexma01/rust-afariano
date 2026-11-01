@@ -7,16 +7,19 @@
 #   docker buildx build --platform linux/amd64 --target binaries -o dist .   # binaries only
 
 FROM --platform=$BUILDPLATFORM rust:1.98-alpine AS build
-ARG TARGETARCH
+# Toolchain steps do not depend on the target, so a multi-platform build runs
+# them once. The cache mounts are `sharing=locked`: the per-platform builds run
+# in parallel and would otherwise race unpacking the same crates.
 RUN apk add --no-cache musl-dev zig
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo install --locked cargo-zigbuild
 RUN rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rustfmt.toml ./
 COPY crates crates
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
+ARG TARGETARCH
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
     case "$TARGETARCH" in \
       amd64) T=x86_64-unknown-linux-musl ;; \
       arm64) T=aarch64-unknown-linux-musl ;; \
