@@ -1,0 +1,28 @@
+{% import "macros.html" as ui %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up · rust-afariano</title>
+<link rel="icon" href="/-/static/favicon.png" type="image/png">
+<link rel="stylesheet" href="/-/static/app.css">
+</head>
+<body>
+<main class="center-page">
+  <div class="signin-card">
+    <img src="/-/static/logo.png" alt="">
+    <h1>Create the first administrator</h1>
+    <p>This account manages users and runners. You can add more people afterwards.</p>
+    {% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
+    <form class="stack signin-form" method="post" action="/-/setup">
+      <input type="hidden" name="token" value="{{ token }}">
+      <label class="field"><span>Email</span><input type="email" name="email" value="{{ email }}" required autocomplete="username" autofocus></label>
+      <label class="field"><span>Name <span class="hint">(optional)</span></span><input type="text" name="name" value="{{ name }}" autocomplete="name"></label>
+      <label class="field"><span>Password</span><input type="password" name="password" required minlength="10" autocomplete="new-password"><span class="hint">At least 10 characters.</span></label>
+      <label class="field"><span>Repeat the password</span><input type="password" name="password2" required minlength="10" autocomplete="new-password"></label>
+      <button class="btn confirm" type="submit">Create administrator</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

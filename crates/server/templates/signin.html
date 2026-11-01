@@ -1,0 +1,35 @@
+{% import "macros.html" as ui %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · rust-afariano</title>
+<link rel="icon" href="/-/static/favicon.png" type="image/png">
+<link rel="stylesheet" href="/-/static/app.css">
+</head>
+<body>
+<main class="center-page">
+  <div class="signin-card">
+    <img src="/-/static/logo.png" alt="">
+    <h1>Sign in to rust-afariano</h1>
+    {% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
+    {% if password_login %}
+    <form class="stack signin-form" method="post" action="/auth/password">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label class="field"><span>Email</span><input type="email" name="email" value="{{ email }}" required autocomplete="username" autofocus></label>
+      <label class="field"><span>Password</span><input type="password" name="password" required autocomplete="current-password"></label>
+      <button class="btn confirm" type="submit">Sign in</button>
+    </form>
+    {% endif %}
+    {% if !oidc_name.is_empty() || !rich_name.is_empty() %}
+      {% if password_login %}<div class="or"><span>or</span></div>{% endif %}
+      <div class="sso-list">
+      {% if !oidc_name.is_empty() %}<a class="btn" href="/auth/oidc?next={{ next_q }}">Sign in with {{ oidc_name }}</a>{% endif %}
+      {% if !rich_name.is_empty() %}<a class="btn" href="/auth/rich?next={{ next_q }}">Sign in with {{ rich_name }}</a>{% endif %}
+      </div>
+    {% endif %}
+    {% if setup_open %}<p class="hint setup-hint">New installation: create the first administrator with the setup link printed in the server log.</p>{% endif %}
+  </div>
+</main>
+</body>
+</html>

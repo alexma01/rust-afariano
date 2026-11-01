@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}Runners{% endblock %}
+{% block on_runners %}on{% endblock %}
+{% block crumbs %}<span class="here">Runners</span>{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Runners</h1><p class="lead">Machines that run jobs. They poll this server over HTTPS, so they need no open ports.</p></div></div>
+{% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
+{% if !new_token.is_empty() %}
+<div class="alert ok">{% call ui::icon("success") %}{% endcall %}<div>
+  <strong>Runner {{ new_name }} created. Run this on the machine; the token is not shown again.</strong>
+  <pre class="cmd" id="runner-cmd">rust-afariano-runner register --url {{ server_url }} --token {{ new_token }} --executor docker
+rust-afariano-runner install</pre>
+  <button class="btn sm" type="button" data-copy="runner-cmd"><span data-label>Copy commands</span></button>
+  <p class="hint" style="margin-top:8px">Use <code>--executor shell</code> to run jobs on the host itself, and add <code>--privileged</code> for docker-in-docker services.</p>
+</div></div>
+{% endif %}
+<div class="box">
+{% if runners.is_empty() %}
+  <div class="empty"><h2>No runners yet</h2><p>Create one below, then register it on the machine that should run jobs.</p></div>
+{% else %}
+  <table class="t">
+    <thead><tr><th>Runner</th><th class="hide-sm">Machine</th><th>Tags and options</th><th></th></tr></thead>
+    <tbody>
+    {% for row in runners %}
+      <tr>
+        <td>
+          <div class="two-line">
+            <span class="cell-title">{{ row.r.name }}</span>
+            <span>{% if row.r.paused %}{% call ui::badge("canceled", "Paused") %}{% endcall %}{% else if row.online %}{% call ui::badge("success", "Online") %}{% endcall %}{% else %}{% call ui::badge("created", "Offline") %}{% endcall %}{% endif %}</span>
+          </div>
+        </td>
+        <td class="small muted hide-sm"><div class="two-line">
+          <span>{% if row.r.hostname.is_empty() %}Not registered yet{% else %}{{ row.r.hostname }}{% endif %}</span>
+          {% if !row.r.platform.is_empty() %}<span>{{ row.r.platform }}, {{ row.r.executor }} executor{% if !row.r.version.is_empty() %}, v{{ row.r.version }}{% endif %}</span>{% endif %}
+          <span>Last contact {{ row.contacted }}</span>
+        </div></td>
+        <td>
+          <form class="actions" method="post" action="/-/runners/{{ row.r.id }}">
+            <input type="text" name="tags" value="{{ row.tags }}" placeholder="No tags" style="width:12rem" aria-label="Tags of {{ row.r.name }}">
+            <label class="check small"><input type="checkbox" name="run_untagged" value="1"{% if row.r.run_untagged %} checked{% endif %}>Untagged jobs</label>
+            <label class="check small"><input type="checkbox" name="paused" value="1"{% if row.r.paused %} checked{% endif %}>Paused</label>
+            <button class="btn sm" type="submit">Save</button>
+          </form>
+        </td>
+        <td class="r w-min"><form method="post" action="/-/runners/{{ row.r.id }}/delete" data-confirm="Delete the runner {{ row.r.name }}? Its token stops working."><button class="btn icon sm danger" type="submit" aria-label="Delete {{ row.r.name }}" title="Delete">{% call ui::i("cancel") %}{% endcall %}</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+</div>
+
+<section class="settings-section" style="margin-top:28px">
+  <header><h2>New runner</h2><p>Jobs with <code>tags:</code> run only on runners that have every one of those tags.</p></header>
+  <form class="stack" method="post" action="/-/runners">
+    <div class="row2">
+      <label class="field"><span>Name</span><input type="text" name="name" placeholder="build-01" required></label>
+      <label class="field"><span>Tags</span><input type="text" name="tags" placeholder="docker-build, macos"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="run_untagged" value="1" checked><span>Run untagged jobs</span></label>
+    <div><button class="btn confirm" type="submit">Create runner</button></div>
+  </form>
+</section>
+{% endblock %}

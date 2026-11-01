@@ -1,0 +1,27 @@
+{% import "macros.html" as ui %}
+<div class="box">
+<table class="t">
+  <thead><tr><th>Status</th><th>Pipeline</th><th class="hide-sm">Stages</th><th class="r hide-sm">Created</th></tr></thead>
+  <tbody>
+  {% for p in pipelines %}
+    <tr>
+      <td class="w-min"><a href="{{ p.url }}">{% call ui::badge(p.status, p.label()) %}{% endcall %}</a></td>
+      <td>
+        <div class="two-line">
+          <a class="cell-title truncate" href="{{ p.url }}">{% if p.title.is_empty() %}Pipeline #{{ p.iid }}{% else %}{{ p.title }}{% endif %}</a>
+          <span class="meta-line">
+            <a href="{{ p.url }}">#{{ p.iid }}</a>
+            {% if show_repo %}<a href="/{{ p.repo_path }}">{{ p.repo_path }}</a>{% endif %}
+            <span class="pill">{% if p.ref_is_tag %}{% call ui::i("tag") %}{% endcall %}{% else %}{% call ui::i("branch") %}{% endcall %}{% endif %}{{ p.ref_name }}</span>
+            <span class="sha">{{ p.sha_short }}</span>
+            <span>{{ p.trigger() }}</span>
+          </span>
+        </div>
+      </td>
+      <td class="w-min hide-sm"><span class="mini">{% for s in p.stages %}<span title="{{ s.name }}: {{ s.label() }}">{% call ui::icon(s.status) %}{% endcall %}</span>{% endfor %}</span></td>
+      <td class="r w-min hide-sm"><div class="when"><span>{% call ui::i("calendar") %}{% endcall %}{{ p.created_ago }}</span>{% if !p.duration.is_empty() %}<span>{% call ui::i("clock") %}{% endcall %}{{ p.duration }}</span>{% endif %}</div></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

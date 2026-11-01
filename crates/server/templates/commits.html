@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}Commits · {{ nav.path }}{% endblock %}
+{% block repo_nav %}{% include "repo_nav.html" %}{% endblock %}
+{% block crumbs %}{% include "repo_crumbs.html" %}<span class="sep">/</span><span class="here">Commits</span>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Commits</h1>
+    <p class="lead"><span class="pill">{% call ui::i("branch") %}{% endcall %}{{ git_ref }}</span>{% if !path.is_empty() %} <span class="mono">{{ path }}</span>{% endif %}</p>
+  </div>
+</div>
+<div class="box">
+{% if commits.is_empty() %}
+  <div class="empty"><p>No commits on this branch yet.</p></div>
+{% else %}
+  <table class="t"><tbody>
+  {% for c in commits %}
+    <tr>
+      <td class="w-min"><span class="avatar-round" aria-hidden="true">{{ c.author_initial }}</span></td>
+      <td>
+        <div class="two-line">
+          <a class="cell-title truncate" href="{{ c.url }}">{{ c.subject }}</a>
+          <span class="cell-sub">{{ c.author }} committed {{ c.when }}</span>
+        </div>
+      </td>
+      <td class="w-min">{% if !c.status.is_empty() %}<a href="{{ c.status_url }}" title="Pipeline: {{ c.status_label }}">{% call ui::icon(c.status) %}{% endcall %}</a>{% endif %}</td>
+      <td class="r w-min"><a class="sha" href="{{ c.url }}">{{ c.short }}</a></td>
+    </tr>
+  {% endfor %}
+  </tbody></table>
+{% endif %}
+</div>
+<div class="pager">
+  {% if !prev_url.is_empty() %}<a class="btn" href="{{ prev_url }}">Newer</a>{% endif %}
+  {% if !next_url.is_empty() %}<a class="btn" href="{{ next_url }}">Older</a>{% endif %}
+</div>
+{% endblock %}

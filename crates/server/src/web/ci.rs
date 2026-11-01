@@ -1,0 +1,519 @@
+use std::convert::Infallible;
+use std::time::Duration;
+
+use askama::Template;
+use axum::Form;
+use axum::extract::{Path, Query, State};
+use axum::http::header;
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Redirect, Response};
+use futures_util::Stream;
+use serde::Deserialize;
+use tokio::sync::{broadcast, mpsc};
+use tokio_stream::StreamExt as _;
+use tokio_stream::wrappers::ReceiverStream;
+
+use super::{JobRow, PipelineRow, RepoNav, clean_vars, load_repo, render, user_names};
+use crate::app::Shared;
+use crate::auth::CurrentUser;
+use crate::error::{AppError, AppResult, bad};
+use crate::logs::LogEvent;
+use crate::models::{
+    JOB_COLS, Job, PIPELINE_COLS, Pipeline, PipelineVar, RUNNER_COLS, Repo, Runner, User, is_terminal,
+};
+use crate::pipelines::{self, CI_FILE, Created, NewPipeline};
+use crate::util::ago;
+
+#[derive(Template)]
+#[template(path = "pipelines.html")]
+struct PipelinesPage {
+    user: User,
+    nav: RepoNav,
+    pipelines: Vec<PipelineRow>,
+    show_repo: bool,
+    prev_url: String,
+    next_url: String,
+    refresh: bool,
+}
+
+#[derive(Deserialize)]
+pub struct PageQuery {
+    #[serde(default)]
+    page: i64,
+}
+
+pub async fn pipelines(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name)): Path<(String, String)>,
+    Query(q): Query<PageQuery>,
+) -> AppResult<Response> {
+    const PER_PAGE: i64 = 30;
+    let repo = load_repo(&state, &ns, &name).await?;
+    let page = q.page.max(0);
+    let list: Vec<Pipeline> = sqlx::query_as(sql!(
+        "SELECT {PIPELINE_COLS} FROM pipelines WHERE repo_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3"
+    ))
+    .bind(repo.id)
+    .bind(PER_PAGE + 1)
+    .bind(page * PER_PAGE)
+    .fetch_all(&state.db)
+    .await?;
+    let names = user_names(&state, list.iter().filter_map(|p| p.created_by)).await?;
+    let rp = repo.path();
+    let has_next = list.len() as i64 > PER_PAGE;
+    let mut rows: Vec<PipelineRow> = list
+        .iter()
+        .take(PER_PAGE as usize)
+        .map(|p| PipelineRow::new(p, &rp, p.created_by.and_then(|id| names.get(&id)).map(String::as_str)))
+        .collect();
+    super::attach_stages(&state, &mut rows).await?;
+    let refresh = rows.iter().any(PipelineRow::active);
+    render(PipelinesPage {
+        user,
+        nav: RepoNav::new(&repo, "pipelines"),
+        pipelines: rows,
+        show_repo: false,
+        prev_url: if page > 0 { format!("/{rp}/-/pipelines?page={}", page - 1) } else { String::new() },
+        next_url: if has_next { format!("/{rp}/-/pipelines?page={}", page + 1) } else { String::new() },
+        refresh,
+    })
+}
+
+#[derive(Template)]
+#[template(path = "pipeline_new.html")]
+struct NewPipelinePage {
+    user: User,
+    nav: RepoNav,
+    branches: Vec<String>,
+    tags: Vec<String>,
+    selected: String,
+    error: String,
+    vars: Vec<PipelineVar>,
+}
+
+pub async fn new_pipeline_form(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name)): Path<(String, String)>,
+) -> AppResult<Response> {
+    let repo = load_repo(&state, &ns, &name).await?;
+    new_pipeline_page(&state, user, &repo, repo.default_branch.clone(), String::new(), Vec::new()).await
+}
+
+async fn new_pipeline_page(
+    state: &Shared,
+    user: User,
+    repo: &Repo,
+    selected: String,
+    error: String,
+    mut vars: Vec<PipelineVar>,
+) -> AppResult<Response> {
+    let refs = state.git(repo.id).refs().await?;
+    while vars.len() < 3 {
+        vars.push(PipelineVar { key: String::new(), value: String::new() });
+    }
+    render(NewPipelinePage {
+        user,
+        nav: RepoNav::new(repo, "pipelines"),
+        branches: refs.iter().filter(|r| !r.is_tag()).map(|r| r.short().to_string()).collect(),
+        tags: refs.iter().filter(|r| r.is_tag()).map(|r| r.short().to_string()).collect(),
+        selected,
+        error,
+        vars,
+    })
+}
+
+/// `ref` is `branch:<name>` or `tag:<name>`; variables come as parallel arrays.
+pub async fn run_pipeline(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name)): Path<(String, String)>,
+    Form(form): Form<Vec<(String, String)>>,
+) -> AppResult<Response> {
+    let repo = load_repo(&state, &ns, &name).await?;
+    let mut target = String::new();
+    let mut keys = Vec::new();
+    let mut values = Vec::new();
+    for (k, v) in form {
+        match k.as_str() {
+            "ref" => target = v,
+            "var_key" => keys.push(v),
+            "var_value" => values.push(v),
+            _ => {}
+        }
+    }
+    let vars: Vec<PipelineVar> = keys.into_iter().zip(values).map(|(key, value)| PipelineVar { key, value }).collect();
+    let (is_tag, ref_name) = match target.split_once(':') {
+        Some(("tag", t)) => (true, t.to_string()),
+        Some(("branch", b)) => (false, b.to_string()),
+        _ => return Err(bad("choose a branch or tag")),
+    };
+    let vars_clean = match clean_vars(vars.clone()) {
+        Ok(v) => v,
+        Err(AppError::BadRequest(msg)) => return new_pipeline_page(&state, user, &repo, target, msg, vars).await,
+        Err(e) => return Err(e),
+    };
+    let full = format!("refs/{}/{ref_name}", if is_tag { "tags" } else { "heads" });
+    let git = state.git(repo.id);
+    let Some(sha) = git.resolve(&full).await? else {
+        return new_pipeline_page(&state, user, &repo, target, format!("`{ref_name}` does not exist."), vars).await;
+    };
+    let np = NewPipeline {
+        repo: &repo,
+        ref_name: ref_name.clone(),
+        is_tag,
+        sha,
+        before_sha: crate::git::ZERO_SHA.into(),
+        source: "web",
+        user: Some(&user),
+        variables: vars_clean,
+    };
+    let msg = match pipelines::create(&state, np).await? {
+        Created::Pipeline(iid) => {
+            return Ok(Redirect::to(&format!("/{}/-/pipelines/{iid}", repo.path())).into_response());
+        }
+        Created::Filtered(reason) => format!("No pipeline was created: {reason}."),
+        Created::NoConfig => format!("There is no {CI_FILE} on `{ref_name}`."),
+    };
+    new_pipeline_page(&state, user, &repo, target, msg, vars).await
+}
+
+struct StageCol {
+    name: String,
+    jobs: Vec<JobRow>,
+}
+
+#[derive(Template)]
+#[template(path = "pipeline.html")]
+struct PipelinePage {
+    user: User,
+    nav: RepoNav,
+    p: PipelineRow,
+    error: String,
+    stages: Vec<StageCol>,
+    variables: Vec<String>,
+    commit_url: String,
+    created_at: String,
+    can_cancel: bool,
+    can_retry: bool,
+    refresh: bool,
+}
+
+async fn load_pipeline(state: &Shared, repo: &Repo, iid: i32) -> AppResult<Pipeline> {
+    sqlx::query_as(sql!("SELECT {PIPELINE_COLS} FROM pipelines WHERE repo_id = $1 AND iid = $2"))
+        .bind(repo.id)
+        .bind(iid)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+pub async fn pipeline(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name, iid)): Path<(String, String, i32)>,
+) -> AppResult<Response> {
+    let repo = load_repo(&state, &ns, &name).await?;
+    let p = load_pipeline(&state, &repo, iid).await?;
+    let jobs: Vec<Job> = sqlx::query_as(sql!(
+        "SELECT {JOB_COLS} FROM jobs WHERE pipeline_id = $1 AND NOT retried ORDER BY stage_idx, id"
+    ))
+    .bind(p.id)
+    .fetch_all(&state.db)
+    .await?;
+    let rp = repo.path();
+    let names = user_names(&state, p.created_by.into_iter()).await?;
+    let row = PipelineRow::new(&p, &rp, p.created_by.and_then(|id| names.get(&id)).map(String::as_str));
+    let mut stages: Vec<StageCol> = Vec::new();
+    for (idx, stage) in p.stages.iter().enumerate() {
+        let col: Vec<JobRow> =
+            jobs.iter().filter(|j| j.stage_idx as usize == idx).map(|j| JobRow::new(j, &rp)).collect();
+        if !col.is_empty() {
+            stages.push(StageCol { name: stage.clone(), jobs: col });
+        }
+    }
+    let can_cancel = jobs.iter().any(|j| matches!(j.status.as_str(), "created" | "pending" | "running" | "manual"));
+    let can_retry = jobs.iter().any(|j| matches!(j.status.as_str(), "failed" | "canceled"));
+    let refresh = row.active() || jobs.iter().any(|j| matches!(j.status.as_str(), "pending" | "running"));
+    render(PipelinePage {
+        user,
+        nav: RepoNav::new(&repo, "pipelines"),
+        error: p.error.clone().unwrap_or_default(),
+        variables: p.variables.0.iter().map(|v| v.key.clone()).collect(),
+        commit_url: format!("/{rp}/-/commit/{}", p.sha),
+        created_at: p.created_at.format("%Y-%m-%d %H:%M UTC").to_string(),
+        p: row,
+        stages,
+        can_cancel,
+        can_retry,
+        refresh,
+    })
+}
+
+pub async fn pipeline_action(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name, iid, action)): Path<(String, String, i32, String)>,
+) -> AppResult<Response> {
+    let repo = load_repo(&state, &ns, &name).await?;
+    let p = load_pipeline(&state, &repo, iid).await?;
+    match action.as_str() {
+        "cancel" => pipelines::cancel_pipeline(&state, p.id).await?,
+        "retry" => pipelines::retry_pipeline(&state, p.id, &user).await?,
+        _ => return Err(AppError::NotFound),
+    }
+    Ok(Redirect::to(&format!("/{}/-/pipelines/{iid}", repo.path())).into_response())
+}
+
+#[derive(Template)]
+#[template(path = "job.html")]
+struct JobPage {
+    user: User,
+    nav: RepoNav,
+    job: JobRow,
+    pipeline: PipelineRow,
+    runner: String,
+    image: String,
+    created: String,
+    started: String,
+    queued_for: String,
+    exit_code: String,
+    tags: Vec<String>,
+    stream_url: String,
+    raw_url: String,
+    retried_from: String,
+    cancel_requested: bool,
+}
+
+async fn load_job(state: &Shared, repo: &Repo, id: i64) -> AppResult<Job> {
+    let job = pipelines::get_job(state, id).await?;
+    if job.repo_id != repo.id {
+        return Err(AppError::NotFound);
+    }
+    Ok(job)
+}
+
+pub async fn job(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name, id)): Path<(String, String, i64)>,
+) -> AppResult<Response> {
+    let repo = load_repo(&state, &ns, &name).await?;
+    let job = load_job(&state, &repo, id).await?;
+    let p = pipelines::get_pipeline(&state, job.pipeline_id).await?;
+    let rp = repo.path();
+    let runner = match job.runner_id {
+        Some(rid) => sqlx::query_as::<_, Runner>(sql!("SELECT {RUNNER_COLS} FROM runners WHERE id = $1"))
+            .bind(rid)
+            .fetch_optional(&state.db)
+            .await?
+            .map(|r| format!("{} ({}, {})", r.name, r.executor, r.platform))
+            .unwrap_or_else(|| format!("#{rid} (deleted)")),
+        None => String::new(),
+    };
+    let retried_from: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM jobs WHERE retry_of = $1").bind(job.id).fetch_optional(&state.db).await?;
+    let spec = &job.spec.0;
+    render(JobPage {
+        user,
+        nav: RepoNav::new(&repo, "pipelines"),
+        pipeline: PipelineRow::new(&p, &rp, None),
+        runner,
+        image: spec.image.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
+        created: ago(job.created_at),
+        started: job.started_at.map(ago).unwrap_or_default(),
+        queued_for: match (job.queued_at, job.started_at) {
+            (Some(q), Some(s)) => crate::util::duration((s - q).num_seconds()),
+            _ => String::new(),
+        },
+        exit_code: job.exit_code.map(|c| c.to_string()).unwrap_or_default(),
+        tags: job.tags.clone(),
+        stream_url: format!("/{rp}/-/jobs/{}/stream", job.id),
+        raw_url: format!("/{rp}/-/jobs/{}/raw", job.id),
+        retried_from: retried_from.map(|n| format!("/{rp}/-/jobs/{n}")).unwrap_or_default(),
+        cancel_requested: job.cancel_requested && job.status == "running",
+        job: JobRow::new(&job, &rp),
+    })
+}
+
+pub async fn job_raw(
+    State(state): State<Shared>,
+    CurrentUser(_user): CurrentUser,
+    Path((ns, name, id)): Path<(String, String, i64)>,
+) -> AppResult<Response> {
+    let repo = load_repo(&state, &ns, &name).await?;
+    let job = load_job(&state, &repo, id).await?;
+    let data = state.logs.read(job.id, 0, (rust_afariano_proto::MAX_LOG_SIZE + 4096) as usize).await?;
+    let text = strip_ansi(&String::from_utf8_lossy(&data));
+    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response())
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+            for n in chars.by_ref() {
+                if n.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+pub async fn job_action(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name, id, action)): Path<(String, String, i64, String)>,
+) -> AppResult<Response> {
+    let repo = load_repo(&state, &ns, &name).await?;
+    let job = load_job(&state, &repo, id).await?;
+    let target = match action.as_str() {
+        "play" => {
+            pipelines::play_job(&state, &job, &user).await?;
+            job.id
+        }
+        "cancel" => {
+            pipelines::cancel_job(&state, &job).await?;
+            job.id
+        }
+        "retry" => pipelines::retry_job(&state, &job, &user).await.map_err(|e| bad(e.to_string()))?,
+        _ => return Err(AppError::NotFound),
+    };
+    Ok(Redirect::to(&format!("/{}/-/jobs/{target}", repo.path())).into_response())
+}
+
+/// Live log: everything already written, then new bytes as the runner sends
+/// them, then an `end` event with the final status.
+pub async fn job_stream(
+    State(state): State<Shared>,
+    CurrentUser(_user): CurrentUser,
+    Path((ns, name, id)): Path<(String, String, i64)>,
+) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let repo = load_repo(&state, &ns, &name).await?;
+    let job = load_job(&state, &repo, id).await?;
+    let (tx, rx) = mpsc::channel::<Event>(32);
+    tokio::spawn(stream_log(state, job, tx));
+    Ok(Sse::new(ReceiverStream::new(rx).map(Ok)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+}
+
+/// Sends text up to the last complete UTF-8 character; keeps the rest in `carry`.
+fn utf8_chunk(carry: &mut Vec<u8>) -> Option<String> {
+    if carry.is_empty() {
+        return None;
+    }
+    let valid = match std::str::from_utf8(carry) {
+        Ok(_) => carry.len(),
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        Err(_) => carry.len(),
+    };
+    if valid == 0 {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&carry[..valid]).into_owned();
+    carry.drain(..valid);
+    Some(text)
+}
+
+async fn stream_log(state: Shared, job: Job, tx: mpsc::Sender<Event>) {
+    const CHUNK: usize = 256 << 10;
+    const INITIAL_TAIL: u64 = 1 << 20;
+    let mut rx = state.logs.subscribe(job.id);
+    let started_terminal = job.is_terminal();
+    let size = state.logs.size(job.id).await;
+    let mut pos = 0u64;
+    let mut carry: Vec<u8> = Vec::new();
+    if size > 2 * INITIAL_TAIL {
+        pos = size - INITIAL_TAIL;
+        let note =
+            format!("\x1b[33;1m… {} MiB skipped, open the raw log for everything …\x1b[0m\n", (pos >> 20).max(1));
+        let _ = tx.send(log_event(&note)).await;
+    }
+    macro_rules! catch_up {
+        () => {
+            loop {
+                let Ok(data) = state.logs.read(job.id, pos, CHUNK).await else { break };
+                if data.is_empty() {
+                    break;
+                }
+                pos += data.len() as u64;
+                carry.extend_from_slice(&data);
+                if let Some(t) = utf8_chunk(&mut carry) {
+                    if tx.send(log_event(&t)).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        };
+    }
+    catch_up!();
+    let mut finished = started_terminal;
+    while !finished {
+        match tokio::time::timeout(Duration::from_secs(10), rx.recv()).await {
+            Ok(Ok(LogEvent::Chunk { offset, data })) => {
+                let end = offset + data.len() as u64;
+                if end <= pos {
+                    continue;
+                }
+                if offset > pos {
+                    catch_up!();
+                    continue;
+                }
+                carry.extend_from_slice(&data[(pos - offset) as usize..]);
+                pos = end;
+                if let Some(t) = utf8_chunk(&mut carry)
+                    && tx.send(log_event(&t)).await.is_err()
+                {
+                    return;
+                }
+            }
+            Ok(Ok(LogEvent::End)) | Ok(Err(broadcast::error::RecvError::Closed)) => finished = true,
+            Ok(Err(broadcast::error::RecvError::Lagged(_))) => catch_up!(),
+            Err(_) => {
+                // Quiet: check whether the job ended without us hearing about it.
+                match pipelines::get_job(&state, job.id).await {
+                    Ok(j) if is_terminal(&j.status) => finished = true,
+                    Ok(_) => {}
+                    Err(_) => finished = true,
+                }
+            }
+        }
+    }
+    catch_up!();
+    if !carry.is_empty() {
+        let _ = tx.send(log_event(&String::from_utf8_lossy(&carry))).await;
+    }
+    let status = pipelines::get_job(&state, job.id).await.map(|j| j.status).unwrap_or_default();
+    let end = serde_json::json!({ "status": status, "reload": !started_terminal });
+    let _ = tx.send(Event::default().event("end").data(end.to_string())).await;
+}
+
+fn log_event(text: &str) -> Event {
+    Event::default().event("log").data(serde_json::json!({ "t": text }).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf8_carry() {
+        let mut c = "aé".as_bytes().to_vec();
+        let last = c.pop().unwrap();
+        assert_eq!(utf8_chunk(&mut c).as_deref(), Some("a"));
+        c.push(last);
+        assert_eq!(utf8_chunk(&mut c).as_deref(), Some("é"));
+        assert!(c.is_empty());
+    }
+
+    #[test]
+    fn ansi_strip() {
+        assert_eq!(strip_ansi("\x1b[32;1m$ echo\x1b[0m hi"), "$ echo hi");
+    }
+}

@@ -1,0 +1,11 @@
+target/
+data/
+.env
+*.log
+dist/
+
+# Personal deployment scripts and notes, kept out of the public repository.
+ops/
+HUMAN.md
+SUPER_INTELLIGENCE.md
+/screenshots-tmp/

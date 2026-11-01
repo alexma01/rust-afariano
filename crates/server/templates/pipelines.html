@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}Pipelines · {{ nav.path }}{% endblock %}
+{% block repo_nav %}{% include "repo_nav.html" %}{% endblock %}
+{% block crumbs %}{% include "repo_crumbs.html" %}<span class="sep">/</span><span class="here">Pipelines</span>{% endblock %}
+{% block content %}
+{% if refresh %}<span data-refresh="5" hidden></span>{% endif %}
+<div class="page-head">
+  <h1>Pipelines</h1>
+  <div class="actions"><a class="btn confirm" href="/{{ nav.path }}/-/pipelines/new">{% call ui::i("play") %}{% endcall %}Run pipeline</a></div>
+</div>
+{% if pipelines.is_empty() %}
+<div class="box"><div class="empty">
+  <h2>No pipelines yet</h2>
+  <p>Push a <code>.gitlab-ci.yml</code>, or start one by hand on any branch.</p>
+  <a class="btn confirm" href="/{{ nav.path }}/-/pipelines/new">Run pipeline</a>
+</div></div>
+{% else %}
+{% include "pipeline_rows.html" %}
+{% endif %}
+<div class="pager">
+  {% if !prev_url.is_empty() %}<a class="btn" href="{{ prev_url }}">Newer</a>{% endif %}
+  {% if !next_url.is_empty() %}<a class="btn" href="{{ next_url }}">Older</a>{% endif %}
+</div>
+{% endblock %}

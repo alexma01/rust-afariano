@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}Users{% endblock %}
+{% block on_users %}on{% endblock %}
+{% block crumbs %}<span class="here">Users</span>{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Users</h1><p class="lead">Everyone here can read and push to every repository. Administrators also manage users and runners.</p></div></div>
+{% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
+{% if !notice.is_empty() %}<div class="alert ok">{% call ui::icon("success") %}{% endcall %}<div>{{ notice }}</div></div>{% endif %}
+<div class="box">
+<table class="t">
+  <thead><tr><th>Account</th><th class="hide-sm">Sign-in</th><th class="hide-sm">Last sign-in</th><th></th></tr></thead>
+  <tbody>
+  {% for row in users %}
+    <tr>
+      <td>
+        <div class="repo-row">
+          <span class="avatar-round" aria-hidden="true">{{ row.initial }}</span>
+          <span class="two-line" style="min-width:0">
+            <span class="cell-title truncate">{% if row.a.name.is_empty() %}{{ row.a.email }}{% else %}{{ row.a.name }}{% endif %}{% if row.is_me %} <span class="faint">(you)</span>{% endif %}</span>
+            <span class="actions">{% if !row.a.name.is_empty() %}<span class="cell-sub">{{ row.a.email }}</span>{% endif %}{% if row.a.is_admin %}<span class="pill">Admin</span>{% endif %}{% if row.a.disabled %}{% call ui::badge("canceled", "Disabled") %}{% endcall %}{% endif %}</span>
+          </span>
+        </div>
+      </td>
+      <td class="small muted hide-sm">{% if row.a.has_password %}Password{% if !sso.is_empty() %} and {{ sso }}{% endif %}{% else if sso.is_empty() %}No password yet{% else %}{{ sso }} only{% endif %}</td>
+      <td class="small muted hide-sm nowrap"><div class="two-line"><span>{{ row.last_login }}</span><span class="faint">Added {{ row.created }}</span></div></td>
+      <td class="r w-min">
+        <details class="dropdown">
+          <summary class="btn sm">Manage{% call ui::i("chevron") %}{% endcall %}</summary>
+          <div class="dropdown-panel">
+            <div class="actions" style="margin-bottom:12px">
+              {% if row.a.is_admin %}
+                {% if !row.is_me %}<form method="post" action="/-/admin/users/{{ row.a.id }}"><input type="hidden" name="action" value="remove_admin"><button class="btn sm" type="submit">Remove admin</button></form>{% endif %}
+              {% else %}
+                <form method="post" action="/-/admin/users/{{ row.a.id }}"><input type="hidden" name="action" value="make_admin"><button class="btn sm" type="submit">Make admin</button></form>
+              {% endif %}
+              {% if !row.is_me %}
+                {% if row.a.disabled %}
+                <form method="post" action="/-/admin/users/{{ row.a.id }}"><input type="hidden" name="action" value="enable"><button class="btn sm" type="submit">Enable</button></form>
+                {% else %}
+                <form method="post" action="/-/admin/users/{{ row.a.id }}" data-confirm="Disable {{ row.a.email }}? They are signed out everywhere."><input type="hidden" name="action" value="disable"><button class="btn sm danger" type="submit">Disable</button></form>
+                {% endif %}
+                <form method="post" action="/-/admin/users/{{ row.a.id }}" data-confirm="Delete {{ row.a.email }} with their keys and tokens?"><input type="hidden" name="action" value="delete"><button class="btn sm danger" type="submit">Delete</button></form>
+              {% endif %}
+            </div>
+            <form class="stack" method="post" action="/-/admin/users/{{ row.a.id }}" style="text-align:left">
+              <input type="hidden" name="action" value="set_password">
+              <label class="field"><span>New password</span><input type="password" name="password" minlength="10" required autocomplete="new-password"></label>
+              <label class="field"><span>Repeat it</span><input type="password" name="password2" minlength="10" required autocomplete="new-password"></label>
+              <div><button class="btn sm confirm" type="submit">Set password</button></div>
+            </form>
+          </div>
+        </details>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<section class="settings-section" style="margin-top:28px">
+  <header><h2>Add a user</h2><p>{% if sso.is_empty() %}Give them a password and share it privately; they can change it under SSH keys and tokens.{% else %}Leave the password empty if they will sign in with {{ sso }} using this email.{% endif %}</p></header>
+  <form class="stack" method="post" action="/-/admin/users">
+    <div class="row2">
+      <label class="field"><span>Email</span><input type="email" name="email" required autocomplete="off"></label>
+      <label class="field"><span>Name <span class="hint">(optional)</span></span><input type="text" name="name" autocomplete="off"></label>
+    </div>
+    <div class="row2">
+      <label class="field"><span>Password <span class="hint">(optional)</span></span><input type="password" name="password" minlength="10" autocomplete="new-password"></label>
+      <label class="field"><span>Repeat the password</span><input type="password" name="password2" minlength="10" autocomplete="new-password"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="is_admin" value="1"><span>Administrator<span class="hint">Can manage users and runners.</span></span></label>
+    <div><button class="btn confirm" type="submit">Add user</button></div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}Settings · {{ nav.path }}{% endblock %}
+{% block repo_nav %}{% include "repo_nav.html" %}{% endblock %}
+{% block crumbs %}{% include "repo_crumbs.html" %}<span class="sep">/</span><span class="here">Settings</span>{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Settings</h1></div>
+{% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
+{% if !notice.is_empty() %}<div class="alert ok">{% call ui::icon("success") %}{% endcall %}<div>{{ notice }}</div></div>{% endif %}
+
+<section class="settings-section">
+  <header><h2>General</h2><p>Description, default branch, and which branches count as protected.</p></header>
+  <form class="stack" method="post" action="/{{ nav.path }}/-/settings">
+    <label class="field"><span>Description</span><input type="text" name="description" value="{{ repo.description }}"></label>
+    <div class="row2">
+      <label class="field"><span>Default branch</span>
+        {% if branches.is_empty() %}<input type="text" name="default_branch" value="{{ repo.default_branch }}">
+        {% else %}<select name="default_branch">{% for b in branches %}<option{% if *b == repo.default_branch %} selected{% endif %}>{{ b }}</option>{% endfor %}</select>{% endif %}
+      </label>
+      <label class="field"><span>Protected branches</span><input type="text" name="protected_branches" value="{{ repo.protected_branches }}">
+        <span class="hint">Comma separated, <code>*</code> as wildcard. Protected variables reach only these branches and tags.</span></label>
+    </div>
+    <label class="check"><input type="checkbox" name="pipelines_on_push" value="1"{% if repo.pipelines_on_push %} checked{% endif %}>
+      <span>Create pipelines on push<span class="hint">The file's <code>workflow:rules</code> still decide whether one runs.</span></span></label>
+    <div><button class="btn confirm" type="submit">Save changes</button></div>
+  </form>
+</section>
+
+<section class="settings-section" id="variables">
+  <header><h2>CI/CD variables</h2><p>Passed to every job as environment variables. File variables arrive as a path to a file holding the value.</p></header>
+  <div>
+    <div class="box" style="margin-bottom:18px">
+    {% if variables.is_empty() %}
+      <div class="empty"><p>No variables yet.</p></div>
+    {% else %}
+      <table class="t">
+        <thead><tr><th>Key</th><th>Value</th><th>Environment</th><th></th></tr></thead>
+        <tbody>
+        {% for row in variables %}
+          <tr>
+            <td><div class="two-line"><span class="mono">{{ row.v.key }}</span>
+              <span class="actions">{% if row.v.file %}<span class="pill">File</span>{% endif %}{% if row.v.protected %}<span class="pill">Protected</span>{% endif %}{% if row.v.masked %}<span class="pill">Masked</span>{% endif %}</span></div></td>
+            <td class="mono muted">{{ row.preview }}</td>
+            <td>{% if row.v.environment_scope == "*" %}<span class="faint">All</span>{% else %}{{ row.v.environment_scope }}{% endif %}</td>
+            <td class="r w-min"><form method="post" action="/{{ nav.path }}/-/settings/variables/{{ row.v.id }}/delete" data-confirm="Delete {{ row.v.key }}?"><button class="btn icon sm danger" type="submit" aria-label="Delete {{ row.v.key }}" title="Delete">{% call ui::i("cancel") %}{% endcall %}</button></form></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    </div>
+    <form class="stack" method="post" action="/{{ nav.path }}/-/settings/variables">
+      <h3>Add or replace a variable</h3>
+      <div class="row2">
+        <label class="field"><span>Key</span><input type="text" name="key" required pattern="[A-Za-z_][A-Za-z0-9_]*" autocomplete="off"></label>
+        <label class="field"><span>Environment</span><input type="text" name="environment_scope" placeholder="All environments">
+          <span class="hint">Leave empty for all, or name one, like <code>production</code>.</span></label>
+      </div>
+      <label class="field"><span>Value</span><textarea name="value" rows="4" autocomplete="off" spellcheck="false"></textarea>
+        <span class="hint">Saving an existing key and environment replaces its value.</span></label>
+      <label class="check"><input type="checkbox" name="file" value="1"><span>File<span class="hint">For SSH keys, certificates, env files.</span></span></label>
+      <label class="check"><input type="checkbox" name="protected" value="1"><span>Protected<span class="hint">Only pipelines on protected branches and tags receive it.</span></span></label>
+      <label class="check"><input type="checkbox" name="masked" value="1"><span>Masked<span class="hint">Replaced by [MASKED] in job logs. Single line, 8 characters or more.</span></span></label>
+      <div><button class="btn confirm" type="submit">Save variable</button></div>
+    </form>
+  </div>
+</section>
+
+<section class="settings-section danger">
+  <header><h2>Delete repository</h2><p>Removes the repository, its pipelines and their logs. This cannot be undone.</p></header>
+  <form class="stack" method="post" action="/{{ nav.path }}/-/settings/delete" data-confirm="Delete {{ nav.path }} with all its pipelines?">
+    <label class="field"><span>Type <code>{{ nav.path }}</code> to confirm</span><input type="text" name="confirm" autocomplete="off"></label>
+    <div><button class="btn danger solid" type="submit">Delete repository</button></div>
+  </form>
+</section>
+{% endblock %}

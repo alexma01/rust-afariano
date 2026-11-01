@@ -1,0 +1,25 @@
+# Synthetic example: a deploy over SSH with a File variable that holds the key.
+# Pipelines start only by hand (Run pipeline) or through the API, on main;
+# pushes start nothing.
+
+workflow:
+  rules:
+    - if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $CI_COMMIT_BRANCH == "main"
+
+variables:
+  # The checkout must not try to download Git LFS objects.
+  GIT_LFS_SKIP_SMUDGE: "1"
+
+site:deploy:
+  image: alpine:3
+  environment:
+    name: production
+    url: https://www.example.com
+  resource_group: site
+  timeout: 30m
+  before_script:
+    - apk add --no-cache openssh-client >/dev/null
+  script:
+    - grep -q 'PRIVATE KEY' "$DEPLOY_SSH_KEY" || { echo 'CI/CD variable DEPLOY_SSH_KEY is not set' >&2; exit 1; }
+    - chmod 600 "$DEPLOY_SSH_KEY"
+    - ssh -i "$DEPLOY_SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=.ci/known_hosts deploy@203.0.113.10 "$CI_COMMIT_SHA"

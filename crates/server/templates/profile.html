@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}Your account{% if password_login %}
+<section class="settings-section">
+  <header><h2>Password</h2><p>{% if has_password %}For signing in with your email.{% else %}You sign in with single sign-on. Set a password to also sign in with your email.{% endif %}</p></header>
+  <form class="stack" method="post" action="/-/profile/password">
+    {% if has_password %}<label class="field"><span>Current password</span><input type="password" name="current" required autocomplete="current-password"></label>{% endif %}
+    <div class="row2">
+      <label class="field"><span>New password</span><input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+      <label class="field"><span>Repeat it</span><input type="password" name="password2" required minlength="10" autocomplete="new-password"></label>
+    </div>
+    <div><button class="btn confirm" type="submit">Save password</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
+{% block on_profile %}on{% if password_login %}
+<section class="settings-section">
+  <header><h2>Password</h2><p>{% if has_password %}For signing in with your email.{% else %}You sign in with single sign-on. Set a password to also sign in with your email.{% endif %}</p></header>
+  <form class="stack" method="post" action="/-/profile/password">
+    {% if has_password %}<label class="field"><span>Current password</span><input type="password" name="current" required autocomplete="current-password"></label>{% endif %}
+    <div class="row2">
+      <label class="field"><span>New password</span><input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+      <label class="field"><span>Repeat it</span><input type="password" name="password2" required minlength="10" autocomplete="new-password"></label>
+    </div>
+    <div><button class="btn confirm" type="submit">Save password</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
+{% block crumbs %}<span class="here">Your account</span>{% if password_login %}
+<section class="settings-section">
+  <header><h2>Password</h2><p>{% if has_password %}For signing in with your email.{% else %}You sign in with single sign-on. Set a password to also sign in with your email.{% endif %}</p></header>
+  <form class="stack" method="post" action="/-/profile/password">
+    {% if has_password %}<label class="field"><span>Current password</span><input type="password" name="current" required autocomplete="current-password"></label>{% endif %}
+    <div class="row2">
+      <label class="field"><span>New password</span><input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+      <label class="field"><span>Repeat it</span><input type="password" name="password2" required minlength="10" autocomplete="new-password"></label>
+    </div>
+    <div><button class="btn confirm" type="submit">Save password</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Your account</h1><p class="lead">Signed in as {{ user.email }}.</p></div></div>
+{% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
+{% if !notice.is_empty() %}<div class="alert ok">{% call ui::icon("success") %}{% endcall %}<div>{{ notice }}</div></div>{% endif %}
+{% if !new_token.is_empty() %}
+<div class="alert ok">{% call ui::icon("success") %}{% endcall %}<div>
+  <strong>Copy your new token now. It is not shown again.</strong>
+  <div class="secret" id="new-token">{{ new_token }}</div>
+  <button class="btn sm" type="button" data-copy="new-token"><span data-label>Copy token</span></button>
+  <p class="hint" style="margin-top:8px">Use it as the password for <code>{{ http_example }}</code> (any username), or as <code>Authorization: Bearer …</code> for the API.</p>
+</div></div>
+{% endif %}
+
+<section class="settings-section">
+  <header><h2>SSH keys</h2><p>For <code>git</code> over SSH, for example <code>{{ ssh_example }}</code>.</p></header>
+  <div>
+    <div class="box" style="margin-bottom:18px">
+    {% if keys.is_empty() %}<div class="empty"><p>No SSH keys yet.</p></div>{% else %}
+      <table class="t"><tbody>
+      {% for k in keys %}
+        <tr>
+          <td><div class="two-line"><span class="cell-title">{{ k.title }}</span><span class="sha">{{ k.fingerprint }}</span></div></td>
+          <td class="r small muted nowrap hide-sm">Added {{ k.added }}<br>Last used {{ k.used }}</td>
+          <td class="r w-min"><form method="post" action="/-/profile/keys/{{ k.id }}/delete" data-confirm="Remove the key {{ k.title }}?"><button class="btn sm danger" type="submit">Remove</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody></table>
+    {% endif %}
+    </div>
+    <form class="stack" method="post" action="/-/profile/keys">
+      <label class="field"><span>Public key</span><textarea name="key" rows="3" placeholder="ssh-ed25519 AAAA… you@laptop" required spellcheck="false"></textarea>
+        <span class="hint">The content of <code>~/.ssh/id_ed25519.pub</code>.</span></label>
+      <label class="field"><span>Title <span class="hint">(optional)</span></span><input type="text" name="title" placeholder="Work laptop"></label>
+      <div><button class="btn confirm" type="submit">Add key</button></div>
+    </form>
+  </div>
+</section>
+
+<section class="settings-section">
+  <header><h2>Personal access tokens</h2><p>Password for git over HTTPS and bearer token for the API.</p></header>
+  <div>
+    <div class="box" style="margin-bottom:18px">
+    {% if tokens.is_empty() %}<div class="empty"><p>No tokens yet.</p></div>{% else %}
+      <table class="t"><tbody>
+      {% for t in tokens %}
+        <tr>
+          <td><span class="cell-title">{{ t.name }}</span></td>
+          <td class="small muted nowrap hide-sm">Added {{ t.added }}<br>Last used {{ t.used }}</td>
+          <td class="small muted nowrap">Expires {{ t.expires }}</td>
+          <td class="r w-min"><form method="post" action="/-/profile/tokens/{{ t.id }}/delete" data-confirm="Revoke the token {{ t.name }}?"><button class="btn sm danger" type="submit">Revoke</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody></table>
+    {% endif %}
+    </div>
+    <form class="stack" method="post" action="/-/profile/tokens">
+      <div class="row2">
+        <label class="field"><span>Name</span><input type="text" name="name" placeholder="github-sync" required></label>
+        <label class="field"><span>Expires in days</span><input type="number" name="expires_days" min="1" max="3650" placeholder="Never"></label>
+      </div>
+      <div><button class="btn confirm" type="submit">Create token</button></div>
+    </form>
+  </div>
+</section>
+{% if password_login %}
+<section class="settings-section">
+  <header><h2>Password</h2><p>{% if has_password %}For signing in with your email.{% else %}You sign in with single sign-on. Set a password to also sign in with your email.{% endif %}</p></header>
+  <form class="stack" method="post" action="/-/profile/password">
+    {% if has_password %}<label class="field"><span>Current password</span><input type="password" name="current" required autocomplete="current-password"></label>{% endif %}
+    <div class="row2">
+      <label class="field"><span>New password</span><input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+      <label class="field"><span>Repeat it</span><input type="password" name="password2" required minlength="10" autocomplete="new-password"></label>
+    </div>
+    <div><button class="btn confirm" type="submit">Save password</button></div>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

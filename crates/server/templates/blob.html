@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}{{ file_name }} · {{ nav.path }}{% endblock %}
+{% block repo_nav %}{% include "repo_nav.html" %}{% endblock %}
+{% block crumbs %}{% include "repo_crumbs.html" %}<span class="sep">/</span><span class="here">{{ file_name }}</span>{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <span class="pill">{% call ui::i("branch") %}{% endcall %}{{ git_ref }}</span>
+  <nav class="path-crumbs" aria-label="Path">{% for c in crumbs %}{% if !loop.first %}<span class="sep">/</span>{% endif %}{% if c.url.is_empty() %}<span>{{ c.name }}</span>{% else %}<a href="{{ c.url }}">{{ c.name }}</a>{% endif %}{% endfor %}</nav>
+</div>
+<div class="box">
+  <div class="box-head">
+    {% call ui::i("file") %}{% endcall %}<strong>{{ file_name }}</strong><span class="faint small">{{ size }}</span>
+    <span class="actions" style="margin-left:auto">
+      <a class="btn sm" href="{{ history_url }}">{% call ui::i("history") %}{% endcall %}History</a>
+      <a class="btn sm" href="{{ raw_url }}">{% call ui::i("doc") %}{% endcall %}Raw</a>
+    </span>
+  </div>
+  {% if binary %}
+    <div class="empty"><p>Binary file, not shown.</p><a class="btn" href="{{ raw_url }}">Download</a></div>
+  {% else if too_large %}
+    <div class="empty"><p>This file is over 1 MiB and is not shown here.</p><a class="btn" href="{{ raw_url }}">Open raw</a></div>
+  {% else if !rendered.is_empty() %}
+    <div class="markdown">{{ rendered|safe }}</div>
+  {% else %}
+    <div class="code"><table>
+    {% for l in lines %}<tr id="L{{ loop.index }}"><td class="ln"><a href="#L{{ loop.index }}">{{ loop.index }}</a></td><td>{{ l }}</td></tr>{% endfor %}
+    </table></div>
+  {% endif %}
+</div>
+{% endblock %}

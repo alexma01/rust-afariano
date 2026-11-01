@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}New repository{% endblock %}
+{% block on_repos %}on{% endblock %}
+{% block crumbs %}<a href="/">Repositories</a><span class="sep">/</span><span class="here">New repository</span>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>New repository</h1><p class="lead">Starts empty. Push an existing project into it afterwards.</p></div>
+</div>
+{% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
+<form class="stack" method="post" action="/-/new">
+  <div class="row2">
+    <label class="field"><span>Namespace</span>
+      <input type="text" name="namespace" value="{{ namespace }}" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" autocomplete="off">
+      <span class="hint">A group or your name, for example <code>hw</code>.</span></label>
+    <label class="field"><span>Name</span>
+      <input type="text" name="name" value="{{ name }}" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]*" autocomplete="off" autofocus></label>
+  </div>
+  <label class="field"><span>Description <span class="hint">(optional)</span></span><input type="text" name="description" value="{{ description }}"></label>
+  <label class="field"><span>Default branch</span><input type="text" name="default_branch" value="{{ default_branch }}"></label>
+  <div class="actions"><button class="btn confirm" type="submit">Create repository</button><a class="btn" href="/">Cancel</a></div>
+</form>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}{{ commit.subject }} · {{ nav.path }}{% endblock %}
+{% block repo_nav %}{% include "repo_nav.html" %}{% endblock %}
+{% block crumbs %}{% include "repo_crumbs.html" %}<span class="sep">/</span><a href="/{{ nav.path }}/-/commits">Commits</a><span class="sep">/</span><span class="here mono">{{ commit.short }}</span>{% endblock %}
+{% block content %}
+<div class="box" style="margin-bottom:20px">
+  <div class="commit-box">
+    <h2>{{ commit.subject }}</h2>
+    {% if !commit.body.is_empty() %}<pre>{{ commit.body }}</pre>{% endif %}
+    <div class="meta-line">
+      <span>{% call ui::i("user") %}{% endcall %}{{ commit.author }} committed {{ commit.when }}</span>
+      <span>{% call ui::i("commit") %}{% endcall %}<span class="sha">{{ commit.sha }}</span></span>
+      {% for (short, url) in parents %}<span>Parent <a class="sha" href="{{ url }}">{{ short }}</a></span>{% endfor %}
+      {% if let Some(p) = pipeline %}<a href="{{ p.url }}">{% call ui::badge(p.status, p.label()) %}{% endcall %}</a>{% endif %}
+      <a class="btn sm" href="{{ tree_url }}" style="margin-left:auto">{% call ui::i("code") %}{% endcall %}Browse files</a>
+    </div>
+  </div>
+</div>
+<p class="muted small">{{ files.len() }} file{% if files.len() != 1 %}s{% endif %} changed</p>
+{% if truncated %}<div class="alert info">{% call ui::icon("warning") %}{% endcall %}<div>The diff is large and was cut.</div></div>{% endif %}
+{% for f in files %}
+<div class="box diff-file">
+  <div class="box-head"><span class="truncate">{{ f.name }}</span><span class="adds">+{{ f.adds }}</span><span class="dels">−{{ f.dels }}</span></div>
+  {% if f.binary %}<div class="empty"><p>Binary file changed.</p></div>{% else %}
+  <div class="code diff"><table>
+  {% for l in f.lines %}<tr><td class="ln {{ l.class }}">{{ l.old }}</td><td class="ln {{ l.class }}">{{ l.new }}</td><td class="{{ l.class }}">{{ l.text }}</td></tr>{% endfor %}
+  </table></div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}Repositories{% endblock %}
+{% block on_repos %}on{% endblock %}
+{% block crumbs %}<span class="here">Repositories</span>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Repositories</h1>
+  <div class="actions"><a class="btn confirm" href="/-/new">{% call ui::i("plus") %}{% endcall %}New repository</a></div>
+</div>
+{% if repos.is_empty() %}
+<div class="box"><div class="empty">
+  <h2>No repositories yet</h2>
+  <p>Create one, then push an existing project into it.</p>
+  <a class="btn confirm" href="/-/new">New repository</a>
+</div></div>
+{% else %}
+<div class="box">
+<table class="t"><tbody>
+  {% for r in repos %}
+  <tr>
+    <td>
+      <a class="repo-row" href="/{{ r.path }}">
+        <span class="avatar" style="--h: {{ r.hue }}">{{ r.initial }}</span>
+        <span class="two-line" style="min-width:0">
+          <span class="path"><span class="ns">{{ r.ns }} /</span> {{ r.name }}</span>
+          {% if !r.description.is_empty() %}<span class="cell-sub truncate">{{ r.description }}</span>{% endif %}
+        </span>
+      </a>
+    </td>
+    <td class="w-min">{% if !r.status.is_empty() %}<a href="{{ r.status_url }}" title="Latest pipeline: {{ r.status_label }}">{% call ui::icon(r.status) %}{% endcall %}</a>{% endif %}</td>
+    <td class="r w-min muted small hide-sm">Updated {{ r.activity }}</td>
+  </tr>
+  {% endfor %}
+</tbody></table>
+</div>
+{% endif %}
+{% if !pipelines.is_empty() %}
+<div class="section-title"><h2>Recent pipelines</h2></div>
+{% include "pipeline_rows.html" %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,65 @@
+# rust-afariano + Postgres on one machine.
+#
+#   docker compose up -d
+#   docker compose logs rust-afariano      # open the setup link it prints to
+#                                          # create the first admin account
+#
+# Git over HTTPS and the web UI are on :8080 (put a TLS reverse proxy in front,
+# see contrib/nginx.conf.example), git over SSH on :2222. Set
+# RUST_AFARIANO_PUBLIC_URL to the address people will use.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rust_afariano
+      POSTGRES_DB: rust_afariano
+      # Change it (e.g. POSTGRES_PASSWORD=… in a .env file next to this file).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rust_afariano -d rust_afariano"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rust-afariano:
+    image: ghcr.io/frank10gm/rust-afariano:latest
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+      - "2222:2222"
+    volumes:
+      - rust-afariano-data:/data
+    # The whole server (web, git, SSH, scheduler) is designed to stay under this.
+    mem_limit: 200m
+    environment:
+      RUST_AFARIANO_DATABASE_URL: postgres://rust_afariano:${POSTGRES_PASSWORD:-change-me}@postgres:5432/rust_afariano
+      RUST_AFARIANO_PUBLIC_URL: ${RUST_AFARIANO_PUBLIC_URL:-http://localhost:8080}
+      # Port shown in SSH clone URLs (the published port above).
+      RUST_AFARIANO_SSH_PUBLIC_PORT: ${RUST_AFARIANO_SSH_PUBLIC_PORT:-2222}
+      # Local accounts with a password.
+      RUST_AFARIANO_PASSWORD_LOGIN: ${RUST_AFARIANO_PASSWORD_LOGIN:-true}
+      # Optional single sign-on with any OpenID Connect provider (Keycloak,
+      # Authentik, Authelia, Zitadel, Google, …). Redirect URI to register:
+      # <public url>/auth/oidc/callback
+      RUST_AFARIANO_OIDC_ISSUER: ${RUST_AFARIANO_OIDC_ISSUER:-}
+      RUST_AFARIANO_OIDC_CLIENT_ID: ${RUST_AFARIANO_OIDC_CLIENT_ID:-}
+      RUST_AFARIANO_OIDC_CLIENT_SECRET: ${RUST_AFARIANO_OIDC_CLIENT_SECRET:-}
+      RUST_AFARIANO_OIDC_NAME: ${RUST_AFARIANO_OIDC_NAME:-Single sign-on}
+      # Who gets an account on first SSO sign-in: exact emails or *@domain,
+      # comma separated.
+      RUST_AFARIANO_ALLOWED_EMAILS: ${RUST_AFARIANO_ALLOWED_EMAILS:-}
+      # Encrypts CI/CD variables at rest (32 bytes, base64). Empty: a key is
+      # generated in the data volume on first start; back it up with the volume.
+      RUST_AFARIANO_SECRET_KEY: ${RUST_AFARIANO_SECRET_KEY:-}
+
+volumes:
+  postgres-data:
+  rust-afariano-data:

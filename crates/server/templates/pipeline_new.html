@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}Run pipeline · {{ nav.path }}{% endblock %}
+{% block repo_nav %}{% include "repo_nav.html" %}{% endblock %}
+{% block crumbs %}{% include "repo_crumbs.html" %}<span class="sep">/</span><a href="/{{ nav.path }}/-/pipelines">Pipelines</a><span class="sep">/</span><span class="here">Run</span>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Run pipeline</h1><p class="lead">Runs <code>.gitlab-ci.yml</code> from the branch or tag you pick, with <code>CI_PIPELINE_SOURCE=web</code>.</p></div>
+</div>
+{% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
+<form class="stack" method="post" action="/{{ nav.path }}/-/pipelines/new">
+  <label class="field"><span>Run for branch or tag</span>
+    <select name="ref">
+      {% for b in branches %}{% let v = format!("branch:{}", b) %}<option value="{{ v }}"{% if v.as_str() == selected.as_str() || b.as_str() == selected.as_str() %} selected{% endif %}>{{ b }}</option>{% endfor %}
+      {% for t in tags %}{% let v = format!("tag:{}", t) %}<option value="{{ v }}"{% if v.as_str() == selected.as_str() %} selected{% endif %}>Tag {{ t }}</option>{% endfor %}
+    </select>
+  </label>
+  <div class="field">
+    <span>Variables</span>
+    <span class="hint">They override project and YAML variables for this run only.</span>
+    {% for v in vars %}
+    <div class="row2">
+      <input type="text" name="var_key" placeholder="Key" value="{{ v.key }}" autocomplete="off" aria-label="Variable key">
+      <input type="text" name="var_value" placeholder="Value" value="{{ v.value }}" autocomplete="off" aria-label="Variable value">
+    </div>
+    {% endfor %}
+  </div>
+  <div class="actions">
+    <button class="btn confirm" type="submit">{% call ui::i("play") %}{% endcall %}Run pipeline</button>
+    <a class="btn" href="/{{ nav.path }}/-/pipelines">Cancel</a>
+  </div>
+</form>
+{% endblock %}

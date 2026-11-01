@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}Pipeline #{{ p.iid }} · {{ nav.path }}{% endblock %}
+{% block repo_nav %}{% include "repo_nav.html" %}{% endblock %}
+{% block crumbs %}{% include "repo_crumbs.html" %}<span class="sep">/</span><a href="/{{ nav.path }}/-/pipelines">Pipelines</a><span class="sep">/</span><span class="here">#{{ p.iid }}</span>{% endblock %}
+{% block content %}
+{% if refresh %}<span data-refresh="4" hidden></span>{% endif %}
+<div class="pipeline-head">
+  <div style="min-width:0">
+    <h1>{% call ui::badge(p.status, p.label()) %}{% endcall %} Pipeline #{{ p.iid }}</h1>
+    <p class="title">{% if p.title.is_empty() %}No commit message{% else %}{{ p.title }}{% endif %}</p>
+    <div class="meta-line">
+      <span>{% call ui::i("user") %}{% endcall %}{{ p.trigger() }}</span>
+      <span class="pill">{% if p.ref_is_tag %}{% call ui::i("tag") %}{% endcall %}{% else %}{% call ui::i("branch") %}{% endcall %}{% endif %}{{ p.ref_name }}</span>
+      <span>{% call ui::i("commit") %}{% endcall %}<a class="sha" href="{{ commit_url }}">{{ p.sha_short }}</a></span>
+      <span>{% call ui::i("calendar") %}{% endcall %}{{ created_at }}</span>
+      {% if !p.duration.is_empty() %}<span>{% call ui::i("clock") %}{% endcall %}{{ p.duration }}</span>{% endif %}
+      {% if !variables.is_empty() %}<span>Variables {% for v in variables %}<code>{{ v }}</code> {% endfor %}</span>{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    {% if can_retry %}<form method="post" action="{{ p.url }}/retry"><button class="btn" type="submit">{% call ui::i("retry") %}{% endcall %}Retry failed jobs</button></form>{% endif %}
+    {% if can_cancel %}<form method="post" action="{{ p.url }}/cancel" data-confirm="Cancel every unfinished job of this pipeline?"><button class="btn danger" type="submit">{% call ui::i("cancel") %}{% endcall %}Cancel pipeline</button></form>{% endif %}
+  </div>
+</div>
+{% if !error.is_empty() %}
+<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div><strong>The .gitlab-ci.yml of this commit is not valid.</strong><p class="yaml-error">{{ error }}</p></div></div>
+{% endif %}
+{% if !stages.is_empty() %}
+<div class="graph">
+{% for s in stages %}
+  <div class="stage">
+    <h2 class="stage-name">{{ s.name }}</h2>
+    <div class="jobs">
+    {% for j in s.jobs %}
+      <div class="job">
+        <span title="{{ j.label() }}">{% call ui::icon(j.vis) %}{% endcall %}</span>
+        <a class="name" href="{{ j.url }}" title="{{ j.name }}: {{ j.label() }}">{{ j.name }}</a>
+        {% if !j.duration.is_empty() %}<span class="dur">{{ j.duration }}</span>{% endif %}
+        {% if j.can_play %}<form method="post" action="{{ j.url }}/play"><button class="btn icon sm" type="submit" title="Run {{ j.name }}" aria-label="Run {{ j.name }}">{% call ui::i("play") %}{% endcall %}</button></form>{% endif %}
+        {% if j.can_retry && j.status != "success" %}<form method="post" action="{{ j.url }}/retry"><button class="btn icon sm" type="submit" title="Retry {{ j.name }}" aria-label="Retry {{ j.name }}">{% call ui::i("retry") %}{% endcall %}</button></form>{% endif %}
+      </div>
+    {% endfor %}
+    </div>
+  </div>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

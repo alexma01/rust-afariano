@@ -1,0 +1,12 @@
+{% import "macros.html" as ui %}
+<a class="side-repo" href="/{{ nav.path }}" title="{{ nav.path }}">
+  <span class="avatar" style="--h: {{ nav.hue }}">{{ nav.initial }}</span>
+  <span class="truncate"><span class="ns">{{ nav.ns }}</span><br><span class="name">{{ nav.name }}</span></span>
+</a>
+<nav class="nav" aria-label="Repository">
+  <a href="/{{ nav.path }}" class="{% if nav.tab == "code" %}on{% endif %}">{% call ui::i("code") %}{% endcall %}Code</a>
+  <a href="/{{ nav.path }}/-/commits" class="{% if nav.tab == "commits" %}on{% endif %}">{% call ui::i("commit") %}{% endcall %}Commits</a>
+  <a href="/{{ nav.path }}/-/pipelines" class="{% if nav.tab == "pipelines" %}on{% endif %}">{% call ui::i("pipeline") %}{% endcall %}Pipelines</a>
+  <a href="/{{ nav.path }}/-/settings" class="{% if nav.tab == "settings" %}on{% endif %}">{% call ui::i("settings") %}{% endcall %}Settings</a>
+</nav>
+<div class="side-sep"></div>

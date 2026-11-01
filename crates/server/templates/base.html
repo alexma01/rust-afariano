@@ -1,0 +1,47 @@
+{% import "macros.html" as ui %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %} · rust-afariano</title>
+<link rel="icon" href="/-/static/favicon.png" type="image/png">
+<link rel="preload" href="/-/static/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/-/static/app.css">
+<script src="/-/static/app.js" defer></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/"><img src="/-/static/logo.png" alt="">rust-afariano</a>
+    {% block repo_nav %}{% endblock %}
+    <nav class="nav" aria-label="Main">
+      <a href="/" class="{% block on_repos %}{% endblock %}">{% call ui::i("repo") %}{% endcall %}Repositories</a>
+      <a href="/-/profile" class="{% block on_profile %}{% endblock %}">{% call ui::i("key") %}{% endcall %}Your account</a>
+    </nav>
+    {% if user.is_admin %}
+    <div class="side-sep"></div>
+    <nav class="nav" aria-label="Administration">
+      <a href="/-/runners" class="{% block on_runners %}{% endblock %}">{% call ui::i("runner") %}{% endcall %}Runners</a>
+      <a href="/-/admin/users" class="{% block on_users %}{% endblock %}">{% call ui::i("user") %}{% endcall %}Users</a>
+    </nav>
+    {% endif %}
+    <div class="side-foot">Git and CI in one small process.</div>
+  </aside>
+  <div class="scrim"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="btn icon ghost menu-btn" type="button" data-nav-toggle aria-label="Open navigation">{% call ui::i("menu") %}{% endcall %}</button>
+      <nav class="crumbs" aria-label="Breadcrumb">{% block crumbs %}{% endblock %}</nav>
+      <div class="user">
+        <span class="avatar-round" aria-hidden="true">{{ user.initial() }}</span>
+        <span class="email">{{ user.email }}</span>
+        <form method="post" action="/auth/logout"><button class="btn icon ghost sm" type="submit" title="Sign out" aria-label="Sign out">{% call ui::i("signout") %}{% endcall %}</button></form>
+      </div>
+    </header>
+    <main class="page">
+{% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+</body>
+</html>

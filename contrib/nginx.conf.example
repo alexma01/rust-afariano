@@ -1,0 +1,46 @@
+# Example nginx reverse proxy for rust-afariano.
+#
+# The server listens on 127.0.0.1:8080 (RUST_AFARIANO_HTTP_ADDR) and serves git
+# over SSH itself on :2222, which does not go through nginx. Replace the host
+# name and certificate paths with yours (certbot --nginx or --webroot both work).
+
+server {
+    listen 80;
+    server_name git.example.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://git.example.com$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name git.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/git.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/git.example.com/privkey.pem;
+
+    # git pushes have no natural size limit: stream them instead of buffering.
+    client_max_body_size 0;
+    proxy_request_buffering off;
+    # Clones and live job logs (server-sent events) must reach the client as
+    # they are produced.
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+    proxy_send_timeout 1h;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}

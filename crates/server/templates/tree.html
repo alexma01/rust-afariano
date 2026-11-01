@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% import "macros.html" as ui %}
+{% block title %}{{ nav.path }}{% endblock %}
+{% block repo_nav %}{% include "repo_nav.html" %}{% endblock %}
+{% block crumbs %}{% include "repo_crumbs.html" %}{% if !root %}<span class="sep">/</span><span class="here">Files</span>{% endif %}{% endblock %}
+{% block content %}
+{% if root %}
+<div class="project-head">
+  <span class="avatar lg" style="--h: {{ nav.hue }}">{{ nav.initial }}</span>
+  <div>
+    <h1>{{ nav.name }}</h1>
+    {% if !nav.description.is_empty() %}<p class="lead">{{ nav.description }}</p>{% endif %}
+  </div>
+</div>
+{% if !empty %}
+<div class="stats">
+  <span>{% call ui::i("commit") %}{% endcall %}<strong>{{ commit_count }}</strong> commit{% if commit_count != 1 %}s{% endif %}</span>
+  <span>{% call ui::i("branch") %}{% endcall %}<strong>{{ branches.len() }}</strong> branch{% if branches.len() != 1 %}es{% endif %}</span>
+  <span>{% call ui::i("tag") %}{% endcall %}<strong>{{ tags.len() }}</strong> tag{% if tags.len() != 1 %}s{% endif %}</span>
+</div>
+{% endif %}
+{% endif %}
+
+{% if empty %}
+<div class="box"><div class="box-body">
+  <h2>Push your code</h2>
+  <p class="muted">This repository is empty. From an existing project:</p>
+  <pre class="cmd">git remote add origin {{ http_url }}
+git push -u origin --all
+git push origin --tags</pre>
+  <p class="hint">HTTPS asks for a password: use a <a href="/-/profile">personal access token</a>. Over SSH the remote is <code>{{ ssh_url }}</code>, with a key added on the same page.</p>
+</div></div>
+{% else %}
+<div class="toolbar">
+  <details class="dropdown">
+    <summary class="btn">{% call ui::i("branch") %}{% endcall %}{{ git_ref }}{% call ui::i("chevron") %}{% endcall %}</summary>
+    <div class="dropdown-panel left menu-list">
+      {% if !branches.is_empty() %}<div class="group">Branches</div>{% endif %}
+      {% for b in branches %}<a href="/{{ nav.path }}/-/tree/{{ b }}" class="{% if *b == git_ref %}on{% endif %}">{% call ui::i("branch") %}{% endcall %}<span class="truncate">{{ b }}</span></a>{% endfor %}
+      {% if !tags.is_empty() %}<div class="group">Tags</div>{% endif %}
+      {% for t in tags %}<a href="/{{ nav.path }}/-/tree/{{ t }}" class="{% if *t == git_ref %}on{% endif %}">{% call ui::i("tag") %}{% endcall %}<span class="truncate">{{ t }}</span></a>{% endfor %}
+    </div>
+  </details>
+  <nav class="path-crumbs" aria-label="Path">{% for c in crumbs %}{% if !loop.first %}<span class="sep">/</span>{% endif %}<a href="{{ c.url }}">{{ c.name }}</a>{% endfor %}</nav>
+  <span class="grow"></span>
+  <a class="btn" href="{{ history_url }}">{% call ui::i("history") %}{% endcall %}History</a>
+  <details class="dropdown">
+    <summary class="btn confirm">Clone{% call ui::i("chevron") %}{% endcall %}</summary>
+    <div class="dropdown-panel">
+      <label class="field"><span>Clone with SSH</span>
+        <span class="input-group"><input id="clone-ssh" type="text" readonly value="{{ ssh_url }}"><button class="btn icon" type="button" data-copy="clone-ssh" aria-label="Copy SSH URL">{% call ui::i("copy") %}{% endcall %}</button></span></label>
+      <label class="field"><span>Clone with HTTPS</span>
+        <span class="input-group"><input id="clone-http" type="text" readonly value="{{ http_url }}"><button class="btn icon" type="button" data-copy="clone-http" aria-label="Copy HTTPS URL">{% call ui::i("copy") %}{% endcall %}</button></span></label>
+      <p class="hint" style="margin:10px 0 0">HTTPS uses a personal access token as the password.</p>
+    </div>
+  </details>
+</div>
+
+<div class="box">
+  {% if let Some(c) = last_commit %}
+  <div class="last-commit">
+    <span class="avatar-round" aria-hidden="true">{{ c.author_initial }}</span>
+    <div class="msg">
+      <div class="truncate"><a href="{{ c.url }}">{{ c.subject }}</a></div>
+      <div class="xs muted">{{ c.author }} committed {{ c.when }}</div>
+    </div>
+    {% if let Some(p) = pipeline %}<a href="{{ p.url }}" title="Pipeline #{{ p.iid }}: {{ p.label() }}">{% call ui::icon(p.status) %}{% endcall %}</a>{% endif %}
+    <a class="sha hide-sm" href="{{ c.url }}">{{ c.short }}</a>
+  </div>
+  {% endif %}
+  <table class="t files"><tbody>
+  {% for e in entries %}
+    <tr>
+      <td class="ico">{% if e.is_dir %}<span class="dir">{% call ui::i("folder") %}{% endcall %}</span>{% else %}{% call ui::i("file") %}{% endcall %}{% endif %}</td>
+      <td><a href="{{ e.url }}">{{ e.name }}</a></td>
+      <td class="r w-min faint small">{{ e.size }}</td>
+    </tr>
+  {% endfor %}
+  </tbody></table>
+</div>
+
+{% if !readme.is_empty() %}
+<div class="box readme">
+  <div class="box-head">{% call ui::i("doc") %}{% endcall %}{{ readme_name }}</div>
+  <div class="markdown">{{ readme|safe }}</div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
