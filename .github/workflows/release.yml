@@ -21,9 +21,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Exposes ACTIONS_RUNTIME_TOKEN / cache URL to `run:` steps, which the
-      # `type=gha` cache of the plain `docker buildx build` below needs.
-      - uses: crazy-max/ghaction-github-runtime@v3
       - name: Version
         id: v
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
@@ -31,9 +28,13 @@ jobs:
       # only the final Alpine stage runs under QEMU for arm64.
       - name: Binaries (linux/amd64, linux/arm64)
         run: |
-          docker buildx build --platform linux/amd64,linux/arm64 --target binaries \
-            --cache-from type=gha --cache-to type=gha,mode=max \
-            -o type=local,dest=dist .
+          set -o pipefail
+          if ! docker buildx build --progress=plain --platform linux/amd64,linux/arm64 --target binaries \
+               -o type=local,dest=dist . 2>&1 | tee build.log; then
+            # Annotations are public, job logs are not: surface the tail there.
+            tail -n 40 build.log | sed 's/%/%25/g' | awk 'BEGIN{printf "::error title=buildx failed::"} {printf "%s%%0A", $0} END{print ""}'
+            exit 1
+          fi
           mkdir -p assets
           for pair in amd64:x86_64 arm64:aarch64; do
             plat=${pair%%:*}; arch=${pair##*:}
