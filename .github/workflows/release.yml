@@ -1,5 +1,10 @@
 name: Release
 
+# On a v* tag: a draft release with the CHANGELOG notes, the multi-arch image on
+# GHCR, Linux and macOS binaries uploaded to the draft, then checksums and publish.
+# Assets go straight to the release with the preinstalled `gh` CLI (no artifact
+# actions in between).
+
 on:
   push:
     tags: ["v*"]
@@ -8,9 +13,38 @@ permissions:
   contents: write
   packages: write
 
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
 jobs:
+  draft:
+    name: Draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The CHANGELOG.md section of this version, without its heading.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "See CHANGELOG.md." > notes.md; fi
+      - name: Create the draft (unless the release exists)
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists, assets will be replaced"
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "rust-afariano ${GITHUB_REF_NAME#v}" --notes-file notes.md
+          fi
+
   linux:
     name: Image and Linux binaries
+    needs: draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -43,6 +77,8 @@ jobs:
           done
           chmod +x assets/*
           ls -l assets
+      - name: Upload binaries to the release
+        run: gh release upload "$GITHUB_REF_NAME" assets/* --clobber
       - name: Image
         uses: docker/build-push-action@v6
         with:
@@ -57,49 +93,33 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.v.outputs.version }}
             org.opencontainers.image.licenses=MIT OR Apache-2.0
-      - uses: actions/upload-artifact@v5
-        with:
-          name: linux
-          path: assets/*
 
   macos:
     name: macOS runner (aarch64)
+    needs: draft
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked -p rust-afariano-runner
-      - run: |
+      - name: Upload the runner to the release
+        run: |
           mkdir -p assets
           cp target/release/rust-afariano-runner assets/rust-afariano-runner-macos-aarch64
-      - uses: actions/upload-artifact@v5
-        with:
-          name: macos
-          path: assets/*
+          gh release upload "$GITHUB_REF_NAME" assets/* --clobber
 
-  release:
-    name: GitHub release
+  publish:
+    name: Checksums and publish
     needs: [linux, macos]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
-        with:
-          path: assets
-          merge-multiple: true
-      - name: Checksums and notes
+      - name: SHA256SUMS
         run: |
-          cd assets && sha256sum rust-afariano-* > SHA256SUMS && cat SHA256SUMS && cd ..
-          version="${GITHUB_REF_NAME#v}"
-          # The CHANGELOG.md section of this version, without its heading.
-          awk -v v="$version" '
-            $0 ~ "^## \\[" v "\\]" { on = 1; next }
-            on && /^## \[/ { exit }
-            on { print }
-          ' CHANGELOG.md > notes.md
-          if [ ! -s notes.md ]; then echo "See CHANGELOG.md." > notes.md; fi
-      - uses: softprops/action-gh-release@v2
-        with:
-          body_path: notes.md
-          files: assets/*
+          mkdir assets && cd assets
+          gh release download "$GITHUB_REF_NAME" --pattern 'rust-afariano-*'
+          sha256sum rust-afariano-* > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS --clobber
+      - name: Publish
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
