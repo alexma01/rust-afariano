@@ -93,6 +93,11 @@ impl Config {
         trim_url(&mut self.rich_auth_url);
         self.oidc_client_id = self.oidc_client_id.take().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         self.oidc_client_secret = self.oidc_client_secret.take().filter(|s| !s.is_empty());
+        // Compose files pass unset settings as empty strings: treat them as unset.
+        self.secret_key = self.secret_key.take().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        if self.oidc_name.trim().is_empty() {
+            self.oidc_name = "single sign-on".into();
+        }
         self.allowed_emails =
             self.allowed_emails.iter().map(|e| e.trim().to_lowercase()).filter(|e| !e.is_empty()).collect();
         if !(self.public_url.starts_with("https://") || self.public_url.starts_with("http://")) {
@@ -169,6 +174,34 @@ mod tests {
             "--allowed-emails",
             allowed,
         ])
+    }
+
+    #[test]
+    fn empty_env_values_mean_unset() {
+        let c = Config::parse_from([
+            "x",
+            "--database-url",
+            "postgres://x",
+            "--public-url",
+            "http://h",
+            "--secret-key",
+            "",
+            "--oidc-issuer",
+            "",
+            "--oidc-client-id",
+            "",
+            "--oidc-name",
+            "",
+            "--allowed-emails",
+            "",
+            "--data-dir",
+            std::env::temp_dir().to_str().unwrap(),
+        ])
+        .validate()
+        .unwrap();
+        assert!(c.secret_key.is_none() && c.oidc_issuer.is_none() && !c.oidc_enabled());
+        assert!(c.allowed_emails.is_empty());
+        assert_eq!(c.oidc_name, "single sign-on");
     }
 
     #[test]

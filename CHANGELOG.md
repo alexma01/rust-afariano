@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-11-01
+
+### Fixed
+
+- The server refused to start when `RUST_AFARIANO_SECRET_KEY` (or other optional
+  settings) was set to an empty string, which is what `docker-compose.yml` passes
+  when you leave it unset. Empty values now mean "not set".
+
 ## [0.1.0] - 2026-11-01
 
 First public release.
@@ -34,4 +42,5 @@ First public release.
   clones of a 216 MB repository at once.
 - Container image, `docker-compose.yml`, and prebuilt runner binaries.
 
+[0.1.1]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.1
 [0.1.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.0

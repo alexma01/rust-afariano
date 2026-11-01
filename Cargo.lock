@@ -2458,7 +2458,7 @@ dependencies = [
 
 [[package]]
 name = "rust-afariano"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2491,7 +2491,7 @@ dependencies = [
 
 [[package]]
 name = "rust-afariano-ci"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "regex",
  "rust-afariano-proto",
@@ -2503,14 +2503,14 @@ dependencies = [
 
 [[package]]
 name = "rust-afariano-proto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "rust-afariano-runner"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
