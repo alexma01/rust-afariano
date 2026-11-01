@@ -57,6 +57,9 @@ pub async fn serve(state: Shared) -> anyhow::Result<()> {
         inactivity_timeout: Some(Duration::from_secs(600)),
         auth_rejection_time: Duration::from_secs(1),
         auth_rejection_time_initial: Some(Duration::from_secs(0)),
+        // Keys only: offering password methods made `ssh` and `git` prompt for a
+        // password that can never work.
+        methods: russh::MethodSet::from(&[russh::MethodKind::PublicKey][..]),
         keys: vec![key],
         ..Default::default()
     });

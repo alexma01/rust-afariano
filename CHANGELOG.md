@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-11-01
+
+### Fixed
+
+- The SSH server offered password authentication it always rejects, so `ssh` and
+  `git` prompted for a password when no registered key matched. It now offers
+  public keys only and fails with `Permission denied (publickey)`.
+
 ## [0.1.2] - 2026-11-01
 
 ### Fixed
@@ -50,6 +58,7 @@ First public release.
   clones of a 216 MB repository at once.
 - Container image, `docker-compose.yml`, and prebuilt runner binaries.
 
+[0.1.3]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.3
 [0.1.2]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.2
 [0.1.1]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.1
 [0.1.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.0
