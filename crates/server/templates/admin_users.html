@@ -7,7 +7,7 @@
 <div class="page-head"><div><h1>Users</h1><p class="lead">Everyone here can read and push to every repository. Administrators also manage users and runners.</p></div></div>
 {% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
 {% if !notice.is_empty() %}<div class="alert ok">{% call ui::icon("success") %}{% endcall %}<div>{{ notice }}</div></div>{% endif %}
-<div class="box">
+<div class="box pop">
 <table class="t">
   <thead><tr><th>Account</th><th class="hide-sm">Sign-in</th><th class="hide-sm">Last sign-in</th><th></th></tr></thead>
   <tbody>

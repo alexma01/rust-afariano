@@ -11,6 +11,8 @@ All notable changes to this project are documented here. The format follows
 - The SSH server offered password authentication it always rejects, so `ssh` and
   `git` prompted for a password when no registered key matched. It now offers
   public keys only and fails with `Permission denied (publickey)`.
+- The **Manage** menu on the Users page opened inside the table's box and was cut
+  off, so its actions and password form could not be reached.
 
 ## [0.1.2] - 2026-11-01
 

@@ -225,6 +225,12 @@ a.ci-badge:hover { text-decoration: none; filter: brightness(.97); }
 /* ------------------------------------------------------------------ lists */
 
 .box { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg); overflow: hidden; }
+/* A box with dropdowns in it: let the panels overflow, round the table corners on the cells. */
+.box.pop { overflow: visible; }
+.box.pop table.t thead th:first-child { border-top-left-radius: calc(var(--radius-lg) - 1px); }
+.box.pop table.t thead th:last-child { border-top-right-radius: calc(var(--radius-lg) - 1px); }
+.box.pop table.t tbody tr:last-child td:first-child { border-bottom-left-radius: calc(var(--radius-lg) - 1px); }
+.box.pop table.t tbody tr:last-child td:last-child { border-bottom-right-radius: calc(var(--radius-lg) - 1px); }
 .box-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg-subtle); }
 .box-body { padding: 16px; }
 table.t { width: 100%; border-collapse: collapse; }
