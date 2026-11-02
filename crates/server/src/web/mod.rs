@@ -58,6 +58,7 @@ pub fn router(state: Shared) -> Router {
         .route("/{ns}/{name}/-/settings", get(settings::repo_settings).post(settings::update_repo))
         .route("/{ns}/{name}/-/settings/variables", post(settings::save_variable))
         .route("/{ns}/{name}/-/settings/variables/{id}/delete", post(settings::delete_variable))
+        .route("/{ns}/{name}/-/settings/variables/{id}/value", post(settings::variable_value))
         .route("/{ns}/{name}/-/settings/delete", post(settings::delete_repo))
         .route("/{ns}/{name}/-/settings/members", post(settings::save_member))
         .route("/{ns}/{name}/-/settings/members/{user_id}/delete", post(settings::delete_member))

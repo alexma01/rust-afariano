@@ -86,14 +86,23 @@
       <div class="empty"><p>No variables yet.</p></div>
     {% else %}
       <table class="t">
-        <thead><tr><th>Key</th><th>Value</th><th>Environment</th><th></th></tr></thead>
+        <thead><tr><th>Key</th><th>Value</th><th class="hide-sm">Environment</th><th></th></tr></thead>
         <tbody>
         {% for row in variables %}
           <tr>
             <td><div class="two-line"><span class="mono">{{ row.v.key }}</span>
-              <span class="actions">{% if row.v.file %}<span class="pill">File</span>{% endif %}{% if row.v.protected %}<span class="pill">Protected</span>{% endif %}{% if row.v.masked %}<span class="pill">Masked</span>{% endif %}</span></div></td>
-            <td class="mono muted">{{ row.preview }}</td>
-            <td>{% if row.v.environment_scope == "*" %}<span class="faint">All</span>{% else %}{{ row.v.environment_scope }}{% endif %}</td>
+              <span class="actions">{% if row.v.file %}<span class="pill">File</span>{% endif %}{% if row.v.protected %}<span class="pill">Protected</span>{% endif %}{% if row.v.masked %}<span class="pill">Masked</span>{% endif %}{% if row.v.environment_scope != "*" %}<span class="pill show-sm">{{ row.v.environment_scope }}</span>{% endif %}</span></div></td>
+            <td class="var-value" data-secret>
+              <div class="actions" data-secret-hidden>
+                <span class="mono muted">{{ row.preview }}</span>
+                {% if row.hidden %}<form method="post" action="/{{ nav.path }}/-/settings/variables/{{ row.v.id }}/value" target="_blank" data-reveal><button class="btn sm" type="submit" aria-label="Show the value of {{ row.v.key }}">{% call ui::i("eye") %}{% endcall %}Show</button></form>{% endif %}
+              </div>
+              {% if row.hidden %}<div data-secret-shown hidden>
+                <pre class="cmd secret-value" id="var-{{ row.v.id }}" data-exact></pre>
+                <div class="actions"><button class="btn sm" type="button" data-copy="var-{{ row.v.id }}"><span data-label>Copy</span></button><button class="btn sm" type="button" data-secret-hide>Hide</button></div>
+              </div>{% endif %}
+            </td>
+            <td class="hide-sm">{% if row.v.environment_scope == "*" %}<span class="faint">All</span>{% else %}{{ row.v.environment_scope }}{% endif %}</td>
             <td class="r w-min"><form method="post" action="/{{ nav.path }}/-/settings/variables/{{ row.v.id }}/delete" data-confirm="Delete {{ row.v.key }}?"><button class="btn icon sm danger" type="submit" aria-label="Delete {{ row.v.key }}" title="Delete">{% call ui::i("cancel") %}{% endcall %}</button></form></td>
           </tr>
         {% endfor %}

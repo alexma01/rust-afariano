@@ -1,6 +1,7 @@
 use askama::Template;
 use axum::Form;
 use axum::extract::{Path, State};
+use axum::http::header;
 use axum::response::{IntoResponse, Redirect, Response};
 use chrono::{Duration, Utc};
 use rust_afariano_proto as proto;
@@ -349,6 +350,8 @@ pub async fn delete_runner(
 struct VarRow {
     v: Variable,
     preview: String,
+    /// The preview does not show the value; a Show button fetches it.
+    hidden: bool,
 }
 
 struct MemberRow {
@@ -436,13 +439,10 @@ async fn settings_page(state: &Shared, user: User, repo: Repo, error: String, no
             .into_iter()
             .map(|mut v| {
                 let plain = state.cipher.decrypt(&v.value).unwrap_or_else(|_| "(cannot decrypt)".into());
-                let preview = if v.masked || v.file || plain.chars().count() > 40 {
-                    "••••••".to_string()
-                } else {
-                    plain
-                };
+                let hidden = v.masked || v.file || plain.chars().count() > 40;
+                let preview = if hidden { "••••••".to_string() } else { plain };
                 v.value.clear();
-                VarRow { v, preview }
+                VarRow { v, preview, hidden }
             })
             .collect(),
         repo,
@@ -543,6 +543,34 @@ pub async fn delete_variable(
         .execute(&state.db)
         .await?;
     Ok(Redirect::to(&format!("/{}/-/settings#variables", repo.path())).into_response())
+}
+
+/// A variable's value as plain text, for maintainers. POST so it passes the
+/// same-origin check and is never prefetched; never cached; logged.
+pub async fn variable_value(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name, id)): Path<(String, String, i64)>,
+) -> AppResult<Response> {
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    let (key, sealed): (String, String) =
+        sqlx::query_as("SELECT key, value FROM variables WHERE id = $1 AND repo_id = $2")
+            .bind(id)
+            .bind(repo.id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+    let value = state.cipher.decrypt(&sealed).map_err(|e| AppError::Internal(anyhow::anyhow!("decrypt {key}: {e}")))?;
+    tracing::info!(repo = %repo.path(), key = %key, user = %user.email, "variable value shown");
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+            (header::REFERRER_POLICY, "no-referrer"),
+        ],
+        value,
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]

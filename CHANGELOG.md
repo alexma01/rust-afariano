@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-11-02
+
+### Added
+
+- Maintainers and administrators can see CI/CD variable values: **Show** next to a
+  hidden value (masked, file or long) loads it in place, with **Copy** and **Hide**.
+  The value is fetched on demand, never embedded in the page or cached, and each
+  view is logged with the user and the key. Without JavaScript it opens as plain text.
+
+### Changed
+
+- On narrow screens the variables table moves the environment under the key.
+
 ## [0.2.0] - 2026-11-02
 
 ### Added
@@ -74,6 +87,7 @@ First public release.
   clones of a 216 MB repository at once.
 - Container image, `docker-compose.yml`, and prebuilt runner binaries.
 
+[0.3.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.3.0
 [0.2.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.2.0
 [0.1.2]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.2
 [0.1.1]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.1

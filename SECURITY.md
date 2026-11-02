@@ -35,7 +35,9 @@ Know these before you deploy:
   every repository, so a job from one repository can reach what jobs from
   another leave on the same machine.
 - **CI/CD variables** are encrypted at rest with the server's secret key, and
-  decrypted when a job starts. Protected variables reach only pipelines on
+  decrypted when a job starts. Members with *maintain* access and administrators
+  can read their values in the UI; each read is logged (`variable value shown`,
+  with user and key). Protected variables reach only pipelines on
   protected branches and tags. Masking hides exact values in job logs; it is not
   a guarantee (a job can always print a secret transformed).
 - **Tokens** (personal access tokens, runner tokens, job tokens) are stored as

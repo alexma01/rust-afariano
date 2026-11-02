@@ -18,7 +18,9 @@
     var el = document.getElementById(btn.getAttribute("data-copy"));
     if (!el) return;
     var text = el.value !== undefined ? el.value : el.textContent;
-    navigator.clipboard.writeText(text.trim()).then(function () {
+    // Secrets are copied byte for byte; commands lose surrounding whitespace.
+    if (!el.hasAttribute("data-exact")) text = text.trim();
+    navigator.clipboard.writeText(text).then(function () {
       var label = btn.querySelector("[data-label]");
       if (label) {
         var old = label.textContent;
@@ -41,6 +43,37 @@
     if (e.key !== "Escape") return;
     document.querySelectorAll("details.dropdown[open]").forEach(function (d) { d.removeAttribute("open"); });
     document.body.classList.remove("nav-open");
+  });
+
+  // CI/CD variables: Show fetches one value and puts it in place, Hide takes it
+  // off the page again. Without JavaScript the form opens it as plain text.
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form.hasAttribute("data-reveal") || e.defaultPrevented) return;
+    e.preventDefault();
+    var cell = form.closest("[data-secret]");
+    var btn = form.querySelector("button");
+    btn.disabled = true;
+    fetch(form.action, { method: "POST", credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.text();
+      })
+      .then(function (text) {
+        cell.querySelector(".secret-value").textContent = text;
+        cell.querySelector("[data-secret-hidden]").hidden = true;
+        cell.querySelector("[data-secret-shown]").hidden = false;
+      })
+      .catch(function (err) { window.alert("Could not load the value (" + err.message + ")."); })
+      .then(function () { btn.disabled = false; });
+  });
+  document.addEventListener("click", function (e) {
+    var hide = e.target.closest("[data-secret-hide]");
+    if (!hide) return;
+    var cell = hide.closest("[data-secret]");
+    cell.querySelector(".secret-value").textContent = "";
+    cell.querySelector("[data-secret-shown]").hidden = true;
+    cell.querySelector("[data-secret-hidden]").hidden = false;
   });
 
   // Confirm destructive forms.
