@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-11-02
+
+### Fixed
+
+- Pushes over HTTPS larger than about 1 MB stalled behind nginx: the server sent
+  its response header before reading the push, and nginx (with
+  `proxy_request_buffering off`) stops forwarding the request body once it has
+  passed the header on. git then waited for the rest of the pack forever and held
+  the repository's push lock, so later pushes timed out too. git's answer now
+  starts only once it has read the whole request.
+
 ## [0.4.0] - 2026-11-02
 
 ### Added
@@ -104,6 +115,7 @@ First public release.
   clones of a 216 MB repository at once.
 - Container image, `docker-compose.yml`, and prebuilt runner binaries.
 
+[0.4.1]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.4.1
 [0.4.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.4.0
 [0.3.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.3.0
 [0.2.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.2.0

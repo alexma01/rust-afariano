@@ -243,13 +243,20 @@ async fn rpc(
         }
     });
 
+    // Answer only once git has output. A reverse proxy streaming the request body
+    // (nginx with `proxy_request_buffering off`) stops forwarding it as soon as it has
+    // passed the response header on, so a push larger than what had arrived by then
+    // stalled halfway, with index-pack waiting and the push lock held. upload-pack and
+    // receive-pack write nothing before they have read their whole request.
+    let mut out = ReaderStream::new(stdout);
+    let first = out.next().await;
     Ok((
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, format!("application/x-git-{}-result", service.name())),
             (header::CACHE_CONTROL, "no-cache".to_string()),
         ],
-        Body::from_stream(ReaderStream::new(stdout)),
+        Body::from_stream(futures_util::stream::iter(first).chain(out)),
     )
         .into_response())
 }
