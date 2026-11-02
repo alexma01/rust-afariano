@@ -161,7 +161,10 @@ All settings are environment variables (or the same-named flags, see
 
 ## API
 
-Personal access tokens (`Authorization: Bearer rfp_…`) work with a small JSON API:
+Personal access tokens (`Authorization: Bearer rfp_…`) work with a JSON API that
+covers what the web UI does: repositories and their settings, members, CI/CD
+variables, pipelines and jobs (logs, play, retry, cancel) and, for administrators,
+users, service-account tokens and runners. Reference: [docs/API.md](docs/API.md).
 
 ```sh
 # Start a pipeline, with variables
@@ -173,11 +176,8 @@ curl -X POST https://git.example.com/api/v1/repos/acme/website/pipelines \
 curl -H "Authorization: Bearer $TOKEN" https://git.example.com/api/v1/repos/acme/website/pipelines/12
 ```
 
-There are also endpoints to set CI/CD variables
-(`PUT /api/v1/repos/{ns}/{name}/variables/{key}`, maintain access) and, for
-administrators, to create repositories (`POST /api/v1/repos`) and runners
-(`POST /api/v1/runners`). [`contrib/import-repo.sh`](contrib/import-repo.sh)
-uses them to move a repository over from elsewhere.
+[`contrib/import-repo.sh`](contrib/import-repo.sh) uses it to move a repository
+over from elsewhere.
 
 ## How it compares
 

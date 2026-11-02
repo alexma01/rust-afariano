@@ -1,11 +1,11 @@
 {%- macro i(name) -%}
-<svg class="i" aria-hidden="true"><use href="/-/static/icons.svg#i-{{ name }}"></use></svg>
+<svg class="i" aria-hidden="true"><use href="/-/static/icons.svg?v={{ crate::web::ASSET_V }}#i-{{ name }}"></use></svg>
 {%- endmacro -%}
 
 {%- macro icon(st) -%}
-<svg class="ci-icon s-{{ st }}" aria-hidden="true"><use href="/-/static/icons.svg#st-{{ st }}"></use></svg>
+<svg class="ci-icon s-{{ st }}" aria-hidden="true"><use href="/-/static/icons.svg?v={{ crate::web::ASSET_V }}#st-{{ st }}"></use></svg>
 {%- endmacro -%}
 
 {%- macro badge(st, label) -%}
-<span class="ci-badge s-{{ st }}"><svg class="ci-icon" aria-hidden="true"><use href="/-/static/icons.svg#st-{{ st }}"></use></svg>{{ label }}</span>
+<span class="ci-badge s-{{ st }}"><svg class="ci-icon" aria-hidden="true"><use href="/-/static/icons.svg?v={{ crate::web::ASSET_V }}#st-{{ st }}"></use></svg>{{ label }}</span>
 {%- endmacro -%}

@@ -99,25 +99,15 @@ pub async fn create_user(
     AdminUser(user): AdminUser,
     Form(f): Form<NewUserForm>,
 ) -> AppResult<Response> {
-    let email = f.email.trim().to_lowercase();
-    if !accounts::valid_email(&email) {
-        return users_page(&state, user, "Enter a valid email address.", "").await;
-    }
-    if accounts::find_by_email(&state.db, &email).await?.is_some() {
-        return users_page(&state, user, "An account with that email already exists.", "").await;
-    }
-    let hash = if f.password.is_empty() {
-        None
-    } else {
-        if let Err(e) = accounts::check_new_password(&f.password, &f.password2) {
-            return users_page(&state, user, e, "").await;
-        }
-        Some(accounts::hash_password(&state, f.password).await?)
-    };
     let admin = f.is_admin.is_some_and(|v| !v.is_empty());
-    accounts::create_user(&state.db, &email, &f.name, hash.as_deref(), admin).await?;
-    tracing::info!(email = %email, by = %user.email, admin, "account created");
-    users_page(&state, user, "", &format!("Account {email} created.")).await
+    let password = Some((f.password.as_str(), f.password2.as_str()));
+    match crate::ops::create_account(&state, &user, &f.email, &f.name, password, admin).await? {
+        Ok(_) => {
+            let email = f.email.trim().to_lowercase();
+            users_page(&state, user, "", &format!("Account {email} created.")).await
+        }
+        Err(e) => users_page(&state, user, e, "").await,
+    }
 }
 
 #[derive(Deserialize)]

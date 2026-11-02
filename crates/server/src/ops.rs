@@ -3,9 +3,13 @@
 
 use rust_afariano_proto as proto;
 
+use chrono::{Duration, Utc};
+
+use crate::access::Role;
+use crate::accounts;
 use crate::app::AppState;
 use crate::error::AppResult;
-use crate::models::User;
+use crate::models::{Repo, User};
 use crate::util::{hash_token, new_token, reserved_namespace, valid_slug};
 use crate::web::valid_var_key;
 
@@ -142,4 +146,114 @@ pub async fn create_runner(
     .await?;
     tracing::info!(runner = name, user = %user.email, "runner created");
     Ok(Ok((id, token)))
+}
+
+/// Creates an account; without a password it signs in through SSO only.
+/// `password` is `(password, repeated)`.
+pub async fn create_account(
+    state: &AppState,
+    by: &User,
+    email: &str,
+    name: &str,
+    password: Option<(&str, &str)>,
+    is_admin: bool,
+) -> Checked<i64> {
+    let email = email.trim().to_lowercase();
+    if !accounts::valid_email(&email) {
+        return Ok(Err("Enter a valid email address."));
+    }
+    if accounts::find_by_email(&state.db, &email).await?.is_some() {
+        return Ok(Err("An account with that email already exists."));
+    }
+    let hash = match password.filter(|(p, _)| !p.is_empty()) {
+        None => None,
+        Some((p, again)) => {
+            if let Err(e) = accounts::check_new_password(p, again) {
+                return Ok(Err(e));
+            }
+            Some(accounts::hash_password(state, p.to_string()).await?)
+        }
+    };
+    let id = accounts::create_user(&state.db, &email, name, hash.as_deref(), is_admin).await?;
+    tracing::info!(email = %email, by = %by.email, admin = is_admin, "account created");
+    Ok(Ok(id))
+}
+
+/// Creates a personal access token for `user_id`; returns it (shown once, stored hashed).
+pub async fn create_token(state: &AppState, user_id: i64, name: &str, expires_days: Option<i64>) -> Checked<String> {
+    let name = name.trim();
+    if name.is_empty() || name.len() > 100 {
+        return Ok(Err("Give the token a name (up to 100 characters)."));
+    }
+    let expires = expires_days.filter(|d| *d > 0).map(|d| Utc::now() + Duration::days(d.clamp(1, 3650)));
+    let token = new_token(proto::PAT_PREFIX);
+    sqlx::query("INSERT INTO access_tokens (user_id, name, token_hash, expires_at) VALUES ($1, $2, $3, $4)")
+        .bind(user_id)
+        .bind(name)
+        .bind(hash_token(&token))
+        .bind(expires)
+        .execute(&state.db)
+        .await?;
+    Ok(Ok(token))
+}
+
+pub struct RepoSettings {
+    pub description: String,
+    pub default_branch: String,
+    /// Patterns; empty ones are dropped.
+    pub protected_branches: Vec<String>,
+    pub pipelines_on_push: bool,
+}
+
+impl RepoSettings {
+    pub fn of(repo: &Repo) -> Self {
+        Self {
+            description: repo.description.clone(),
+            default_branch: repo.default_branch.clone(),
+            protected_branches: repo.protected_branches.split(',').map(|p| p.trim().to_string()).collect(),
+            pipelines_on_push: repo.pipelines_on_push,
+        }
+    }
+}
+
+/// Saves a repository's general settings. Moves HEAD when the new default branch exists.
+pub async fn update_repo(state: &AppState, repo: &Repo, s: RepoSettings) -> Checked<()> {
+    let branch = s.default_branch.trim().to_string();
+    if !valid_branch(&branch) {
+        return Ok(Err("Default branch name is not valid."));
+    }
+    let git = state.git(repo.id);
+    if branch != repo.default_branch && git.resolve(&format!("refs/heads/{branch}")).await?.is_some() {
+        git.set_head(&branch).await?;
+    }
+    let protected: Vec<&str> = s.protected_branches.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+    if protected.iter().any(|p| p.contains(',')) {
+        return Ok(Err("A protected branch pattern cannot contain a comma."));
+    }
+    sqlx::query(
+        "UPDATE repos SET description = $2, default_branch = $3, protected_branches = $4, pipelines_on_push = $5 \
+         WHERE id = $1",
+    )
+    .bind(repo.id)
+    .bind(s.description.trim())
+    .bind(&branch)
+    .bind(protected.join(", "))
+    .bind(s.pipelines_on_push)
+    .execute(&state.db)
+    .await?;
+    Ok(Ok(()))
+}
+
+/// Adds a member or changes their role.
+pub async fn set_member(state: &AppState, repo_id: i64, user_id: i64, role: Role) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO repo_members (repo_id, user_id, role) VALUES ($1, $2, $3) \
+         ON CONFLICT (repo_id, user_id) DO UPDATE SET role = EXCLUDED.role",
+    )
+    .bind(repo_id)
+    .bind(user_id)
+    .bind(role.as_str())
+    .execute(&state.db)
+    .await
+    .map(|_| ())
 }

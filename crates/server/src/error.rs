@@ -68,10 +68,11 @@ impl IntoResponse for AppError {
         let body = format!(
             "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width, initial-scale=1'>\
              <title>{code} · rust-afariano</title><link rel=icon href=/-/static/favicon.png type=image/png>\
-             <link rel=stylesheet href=/-/static/app.css><main class=center-page><div class=signin-card>\
+             <link rel=stylesheet href='/-/static/app.css?v={v}'><main class=center-page><div class=signin-card>\
              <img src=/-/static/logo.png alt=''><h1>{title}</h1><p>{msg}</p>\
              <a class='btn' href='/'>Back to repositories</a></div></main></html>",
             code = status.as_u16(),
+            v = crate::web::ASSET_V,
             title = match status.as_u16() {
                 404 => "Not found",
                 403 => "Not allowed",

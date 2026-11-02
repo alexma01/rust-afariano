@@ -352,7 +352,7 @@ pub async fn job_raw(
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response())
 }
 
-fn strip_ansi(s: &str) -> String {
+pub(crate) fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
@@ -556,5 +556,11 @@ mod tests {
         let maintain = page(Role::Maintain);
         assert!(maintain.contains("/acme/web/-/pipelines/new"));
         assert!(maintain.contains("/acme/web/-/settings"));
+        // Assets carry the version, so an upgrade is not hidden by a cached copy.
+        let v = crate::web::ASSET_V;
+        assert!(maintain.contains(&format!("/-/static/app.css?v={v}\"")));
+        assert!(maintain.contains(&format!("/-/static/app.js?v={v}\"")));
+        assert!(maintain.contains(&format!("/-/static/icons.svg?v={v}#i-")));
+        assert!(!maintain.contains("/-/static/icons.svg#"));
     }
 }

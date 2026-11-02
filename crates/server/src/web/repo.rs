@@ -162,8 +162,6 @@ pub async fn create(
     Ok(Redirect::to(&format!("/{ns}/{name}")).into_response())
 }
 
-pub use crate::ops::valid_branch;
-
 // ---------------------------------------------------------------- code
 
 struct Crumb {
@@ -677,6 +675,7 @@ pub async fn commit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ops::valid_branch;
 
     #[test]
     fn branches() {

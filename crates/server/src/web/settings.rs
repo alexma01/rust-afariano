@@ -3,8 +3,7 @@ use axum::Form;
 use axum::extract::{Path, State};
 use axum::http::header;
 use axum::response::{IntoResponse, Redirect, Response};
-use chrono::{Duration, Utc};
-use rust_afariano_proto as proto;
+use chrono::Utc;
 use serde::Deserialize;
 
 use super::{RepoNav, load_repo, render};
@@ -14,7 +13,7 @@ use crate::auth::{AdminUser, CurrentUser};
 use crate::error::{AppError, AppResult, bad};
 use crate::models::{RUNNER_COLS, Repo, Runner, User, Variable};
 use crate::ssh::parse_public_key;
-use crate::util::{ago, hash_token, new_token};
+use crate::util::ago;
 
 fn checked(v: &Option<String>) -> bool {
     v.as_deref().is_some_and(|s| !s.is_empty() && s != "0" && s != "false")
@@ -177,26 +176,14 @@ pub async fn add_token(
     CurrentUser(user): CurrentUser,
     Form(f): Form<TokenForm>,
 ) -> AppResult<Response> {
-    let name = f.name.trim();
-    if name.is_empty() {
-        return profile_page(&state, user, String::new(), "Give the token a name.".into()).await;
-    }
-    let expires = match f.expires_days.trim() {
-        "" | "0" => None,
-        d => Some(
-            Utc::now()
-                + Duration::days(d.parse::<i64>().map_err(|_| bad("expiry must be a number of days"))?.clamp(1, 3650)),
-        ),
+    let days = match f.expires_days.trim() {
+        "" => None,
+        d => Some(d.parse::<i64>().map_err(|_| bad("expiry must be a number of days"))?),
     };
-    let token = new_token(proto::PAT_PREFIX);
-    sqlx::query("INSERT INTO access_tokens (user_id, name, token_hash, expires_at) VALUES ($1, $2, $3, $4)")
-        .bind(user.id)
-        .bind(name)
-        .bind(hash_token(&token))
-        .bind(expires)
-        .execute(&state.db)
-        .await?;
-    profile_page(&state, user, token, String::new()).await
+    match crate::ops::create_token(&state, user.id, &f.name, days).await? {
+        Ok(token) => profile_page(&state, user, token, String::new()).await,
+        Err(e) => profile_page(&state, user, String::new(), e.into()).await,
+    }
 }
 
 pub async fn delete_token(
@@ -477,23 +464,15 @@ pub async fn update_repo(
     Form(f): Form<RepoForm>,
 ) -> AppResult<Response> {
     let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
-    let branch = f.default_branch.trim().to_string();
-    if !super::repo::valid_branch(&branch) {
-        return settings_page(&state, user, repo, "Default branch name is not valid.".into(), String::new()).await;
+    let settings = crate::ops::RepoSettings {
+        description: f.description,
+        default_branch: f.default_branch,
+        protected_branches: f.protected_branches.split(',').map(str::to_string).collect(),
+        pipelines_on_push: checked(&f.pipelines_on_push),
+    };
+    if let Err(e) = crate::ops::update_repo(&state, &repo, settings).await? {
+        return settings_page(&state, user, repo, e.into(), String::new()).await;
     }
-    let git = state.git(repo.id);
-    if branch != repo.default_branch && git.resolve(&format!("refs/heads/{branch}")).await?.is_some() {
-        git.set_head(&branch).await?;
-    }
-    let protected: Vec<&str> = f.protected_branches.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-    sqlx::query("UPDATE repos SET description = $2, default_branch = $3, protected_branches = $4, pipelines_on_push = $5 WHERE id = $1")
-        .bind(repo.id)
-        .bind(f.description.trim())
-        .bind(&branch)
-        .bind(protected.join(", "))
-        .bind(checked(&f.pipelines_on_push))
-        .execute(&state.db)
-        .await?;
     let repo = state.repo_by_id(repo.id).await?;
     settings_page(&state, user, repo, String::new(), "Settings saved.".into()).await
 }
@@ -593,15 +572,7 @@ pub async fn save_member(
     let Some((email, who_name)) = who else {
         return settings_page(&state, user, repo, "That account no longer exists.".into(), String::new()).await;
     };
-    sqlx::query(
-        "INSERT INTO repo_members (repo_id, user_id, role) VALUES ($1, $2, $3) \
-         ON CONFLICT (repo_id, user_id) DO UPDATE SET role = EXCLUDED.role",
-    )
-    .bind(repo.id)
-    .bind(f.user_id)
-    .bind(role.as_str())
-    .execute(&state.db)
-    .await?;
+    crate::ops::set_member(&state, repo.id, f.user_id, role).await?;
     tracing::info!(repo = %repo.path(), member = %email, role = role.as_str(), by = %user.email, "member saved");
     let display = if who_name.is_empty() { email } else { who_name };
     after_member_change(&state, user, repo, format!("{display} now has {} access.", role.label().to_lowercase())).await

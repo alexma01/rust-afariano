@@ -5,13 +5,15 @@ mod ci;
 mod repo;
 mod settings;
 
+pub(crate) use ci::strip_ansi;
+
 use askama::Template;
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware;
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{get, patch, post, put};
 
 use crate::access::{self, Role};
 use crate::app::Shared;
@@ -20,6 +22,10 @@ use crate::error::{AppError, AppResult, bad};
 use crate::models::{Job, Pipeline, PipelineVar, Repo, User};
 use crate::util::{ago, duration, short_sha};
 use crate::{api, git_http, runner_api};
+
+/// Appended to the URLs of assets that change between releases (`?v=…`), so
+/// browsers fetch them again after an upgrade instead of using a cached copy.
+pub const ASSET_V: &str = env!("CARGO_PKG_VERSION");
 
 pub fn router(state: Shared) -> Router {
     let pages = Router::new()
@@ -75,11 +81,21 @@ pub fn router(state: Shared) -> Router {
         .route("/api/v1/runner/jobs/request", post(runner_api::request_job))
         .route("/api/v1/runner/jobs/{id}/log", put(runner_api::put_log))
         .route("/api/v1/runner/jobs/{id}/finish", post(runner_api::finish_job))
+        .route("/api/v1/repos", post(api::create_repo))
+        .route("/api/v1/repos/{ns}/{name}", get(api::get_repo).patch(api::patch_repo))
+        .route("/api/v1/repos/{ns}/{name}/members", get(api::list_members))
+        .route("/api/v1/repos/{ns}/{name}/members/{user}", put(api::put_member).delete(api::delete_member))
+        .route("/api/v1/repos/{ns}/{name}/variables", get(api::list_variables))
+        .route("/api/v1/repos/{ns}/{name}/variables/{key}", put(api::put_variable).delete(api::delete_variable))
         .route("/api/v1/repos/{ns}/{name}/pipelines", post(runner_api::trigger_pipeline))
         .route("/api/v1/repos/{ns}/{name}/pipelines/{iid}", get(api::get_pipeline))
-        .route("/api/v1/repos/{ns}/{name}/variables/{key}", put(api::put_variable))
-        .route("/api/v1/repos", post(api::create_repo))
-        .route("/api/v1/runners", post(api::create_runner))
+        .route("/api/v1/repos/{ns}/{name}/pipelines/{iid}/{action}", post(api::pipeline_action))
+        .route("/api/v1/repos/{ns}/{name}/jobs/{id}/log", get(api::job_log))
+        .route("/api/v1/repos/{ns}/{name}/jobs/{id}/{action}", post(api::job_action))
+        .route("/api/v1/users", get(api::list_users).post(api::create_user))
+        .route("/api/v1/users/{user}/tokens", post(api::create_user_token))
+        .route("/api/v1/runners", get(api::list_runners).post(api::create_runner))
+        .route("/api/v1/runners/{id}", patch(api::patch_runner))
         .layer(DefaultBodyLimit::max(2 << 20))
         .layer(middleware::map_response(crate::error::json_errors));
 

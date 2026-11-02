@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-11-02
+
+### Added
+
+- The JSON API covers the rest of the web UI ([docs/API.md](docs/API.md)):
+  repository settings (`GET`/`PATCH /api/v1/repos/{ns}/{name}`, and settings on
+  create), members, listing and deleting CI/CD variables (never their values), job
+  logs, play/retry/cancel for jobs and retry/cancel for pipelines, and for
+  administrators users, tokens for service accounts and runners (list, change
+  tags, untagged, paused).
+
+### Fixed
+
+- After an upgrade, browsers could keep the previous `app.css`, `app.js` and icons
+  for up to an hour (the new eye icon showed as a blank). Their URLs now carry the
+  version.
+
 ## [0.3.0] - 2026-11-02
 
 ### Added
@@ -87,6 +104,7 @@ First public release.
   clones of a 216 MB repository at once.
 - Container image, `docker-compose.yml`, and prebuilt runner binaries.
 
+[0.4.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.4.0
 [0.3.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.3.0
 [0.2.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.2.0
 [0.1.2]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.2
