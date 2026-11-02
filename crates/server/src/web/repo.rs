@@ -8,8 +8,9 @@ use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use super::{PipelineRow, RepoNav, load_repo, markdown, render, user_names};
+use crate::access::{self, Role};
 use crate::app::Shared;
-use crate::auth::CurrentUser;
+use crate::auth::{AdminUser, CurrentUser};
 use crate::error::{AppError, AppResult};
 use crate::git::{Commit, looks_binary};
 use crate::models::{PIPELINE_COLS, Pipeline, REPO_COLS, Repo, User};
@@ -40,14 +41,22 @@ struct HomePage {
 }
 
 pub async fn home(State(state): State<Shared>, CurrentUser(user): CurrentUser) -> AppResult<Response> {
-    let repos: Vec<Repo> =
-        sqlx::query_as(sql!("SELECT {REPO_COLS} FROM repos ORDER BY COALESCE(pushed_at, created_at) DESC"))
-            .fetch_all(&state.db)
-            .await?;
-    let latest: Vec<(i64, i32, String)> =
-        sqlx::query_as("SELECT DISTINCT ON (repo_id) repo_id, iid, status FROM pipelines ORDER BY repo_id, id DESC")
-            .fetch_all(&state.db)
-            .await?;
+    // None: an administrator, who sees every repository.
+    let visible = access::visible_repo_ids(&state, &user).await?;
+    let repos: Vec<Repo> = sqlx::query_as(sql!(
+        "SELECT {REPO_COLS} FROM repos WHERE $1::bigint[] IS NULL OR id = ANY($1) \
+         ORDER BY COALESCE(pushed_at, created_at) DESC"
+    ))
+    .bind(&visible)
+    .fetch_all(&state.db)
+    .await?;
+    let latest: Vec<(i64, i32, String)> = sqlx::query_as(
+        "SELECT DISTINCT ON (repo_id) repo_id, iid, status FROM pipelines \
+         WHERE $1::bigint[] IS NULL OR repo_id = ANY($1) ORDER BY repo_id, id DESC",
+    )
+    .bind(&visible)
+    .fetch_all(&state.db)
+    .await?;
     let latest: HashMap<i64, (i32, String)> = latest.into_iter().map(|(r, i, s)| (r, (i, s))).collect();
     let paths: HashMap<i64, String> = repos.iter().map(|r| (r.id, r.path())).collect();
     let rows = repos
@@ -71,9 +80,12 @@ pub async fn home(State(state): State<Shared>, CurrentUser(user): CurrentUser) -
             }
         })
         .collect();
-    let recent: Vec<Pipeline> = sqlx::query_as(sql!("SELECT {PIPELINE_COLS} FROM pipelines ORDER BY id DESC LIMIT 15"))
-        .fetch_all(&state.db)
-        .await?;
+    let recent: Vec<Pipeline> = sqlx::query_as(sql!(
+        "SELECT {PIPELINE_COLS} FROM pipelines WHERE $1::bigint[] IS NULL OR repo_id = ANY($1) ORDER BY id DESC LIMIT 15"
+    ))
+    .bind(&visible)
+    .fetch_all(&state.db)
+    .await?;
     let names = user_names(&state, recent.iter().filter_map(|p| p.created_by)).await?;
     let mut pipelines: Vec<PipelineRow> = recent
         .iter()
@@ -99,7 +111,7 @@ struct NewRepoPage {
     default_branch: String,
 }
 
-pub async fn new_form(CurrentUser(user): CurrentUser) -> AppResult<Response> {
+pub async fn new_form(AdminUser(user): AdminUser) -> AppResult<Response> {
     let ns = user
         .email
         .split('@')
@@ -130,7 +142,7 @@ pub struct NewRepoForm {
 
 pub async fn create(
     State(state): State<Shared>,
-    CurrentUser(user): CurrentUser,
+    AdminUser(user): AdminUser,
     Form(f): Form<NewRepoForm>,
 ) -> AppResult<Response> {
     let ns = f.namespace.trim().to_string();
@@ -249,9 +261,9 @@ pub async fn overview(
     CurrentUser(user): CurrentUser,
     Path((ns, name)): Path<(String, String)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let git_ref = repo.default_branch.clone();
-    tree_page(state, user, repo, git_ref, String::new()).await
+    tree_page(state, user, repo, role, git_ref, String::new()).await
 }
 
 pub async fn tree(
@@ -259,18 +271,25 @@ pub async fn tree(
     CurrentUser(user): CurrentUser,
     Path((ns, name, rest)): Path<(String, String, String)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let (git_ref, path) = state.git(repo.id).split_ref_path(&rest).await?.ok_or(AppError::NotFound)?;
-    tree_page(state, user, repo, git_ref, path).await
+    tree_page(state, user, repo, role, git_ref, path).await
 }
 
-async fn tree_page(state: Shared, user: User, repo: Repo, git_ref: String, path: String) -> AppResult<Response> {
+async fn tree_page(
+    state: Shared,
+    user: User,
+    repo: Repo,
+    role: Role,
+    git_ref: String,
+    path: String,
+) -> AppResult<Response> {
     let git = state.git(repo.id);
     let refs = git.refs().await?;
     let rp = repo.path();
     let mut page = TreePage {
         user,
-        nav: RepoNav::new(&repo, "code"),
+        nav: RepoNav::new(&repo, role, "code"),
         empty: refs.is_empty(),
         ssh_url: state.cfg.ssh_clone_url(&rp),
         http_url: state.cfg.http_clone_url(&rp),
@@ -376,7 +395,7 @@ pub async fn blob(
     CurrentUser(user): CurrentUser,
     Path((ns, name, rest)): Path<(String, String, String)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let git = state.git(repo.id);
     let (git_ref, path) = git.split_ref_path(&rest).await?.ok_or(AppError::NotFound)?;
     let rp = repo.path();
@@ -401,7 +420,7 @@ pub async fn blob(
     crumbs.push(Crumb { name: file_name.clone(), url: String::new() });
     render(BlobPage {
         user,
-        nav: RepoNav::new(&repo, "code"),
+        nav: RepoNav::new(&repo, role, "code"),
         git_ref: git_ref.clone(),
         crumbs,
         file_name,
@@ -419,10 +438,10 @@ pub async fn blob(
 /// and a sandboxing CSP) so repository content never runs as a page.
 pub async fn raw(
     State(state): State<Shared>,
-    CurrentUser(_user): CurrentUser,
+    CurrentUser(user): CurrentUser,
     Path((ns, name, rest)): Path<(String, String, String)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let git = state.git(repo.id);
     let (git_ref, path) = git.split_ref_path(&rest).await?.ok_or(AppError::NotFound)?;
     let (_, data) = git.blob(&git_ref, &path, 64 << 20).await?.ok_or(AppError::NotFound)?;
@@ -476,9 +495,9 @@ pub async fn commits_default(
     Path((ns, name)): Path<(String, String)>,
     Query(q): Query<PageQuery>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let r = repo.default_branch.clone();
-    commits_page(state, user, repo, r, String::new(), q.page).await
+    commits_page(state, user, repo, role, r, String::new(), q.page).await
 }
 
 pub async fn commits(
@@ -487,15 +506,16 @@ pub async fn commits(
     Path((ns, name, rest)): Path<(String, String, String)>,
     Query(q): Query<PageQuery>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let (git_ref, path) = state.git(repo.id).split_ref_path(&rest).await?.ok_or(AppError::NotFound)?;
-    commits_page(state, user, repo, git_ref, path, q.page).await
+    commits_page(state, user, repo, role, git_ref, path, q.page).await
 }
 
 async fn commits_page(
     state: Shared,
     user: User,
     repo: Repo,
+    role: Role,
     git_ref: String,
     path: String,
     page: usize,
@@ -533,7 +553,7 @@ async fn commits_page(
     };
     render(CommitsPage {
         user,
-        nav: RepoNav::new(&repo, "commits"),
+        nav: RepoNav::new(&repo, role, "commits"),
         git_ref,
         path,
         commits,
@@ -627,7 +647,7 @@ pub async fn commit(
     CurrentUser(user): CurrentUser,
     Path((ns, name, sha)): Path<(String, String, String)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let git = state.git(repo.id);
     let full = git.resolve(&sha).await?.ok_or(AppError::NotFound)?;
     let c = git.commit(&full).await?.ok_or(AppError::NotFound)?;
@@ -644,7 +664,7 @@ pub async fn commit(
     .await?;
     render(CommitPage {
         user,
-        nav: RepoNav::new(&repo, "commits"),
+        nav: RepoNav::new(&repo, role, "commits"),
         parents: c.parents.iter().map(|p| (short_sha(p).to_string(), format!("/{rp}/-/commit/{p}"))).collect(),
         commit: CommitRow::new(&c, &rp),
         files: parse_diff(&String::from_utf8_lossy(&diff)),

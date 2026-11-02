@@ -6,13 +6,18 @@
 {% block content %}
 <div class="page-head">
   <h1>Repositories</h1>
-  <div class="actions"><a class="btn confirm" href="/-/new">{% call ui::i("plus") %}{% endcall %}New repository</a></div>
+  {% if user.is_admin %}<div class="actions"><a class="btn confirm" href="/-/new">{% call ui::i("plus") %}{% endcall %}New repository</a></div>{% endif %}
 </div>
 {% if repos.is_empty() %}
 <div class="box"><div class="empty">
+  {% if user.is_admin %}
   <h2>No repositories yet</h2>
   <p>Create one, then push an existing project into it.</p>
   <a class="btn confirm" href="/-/new">New repository</a>
+  {% else %}
+  <h2>No repositories for you yet</h2>
+  <p>An administrator or a repository's maintainer can add you to it.</p>
+  {% endif %}
 </div></div>
 {% else %}
 <div class="box">

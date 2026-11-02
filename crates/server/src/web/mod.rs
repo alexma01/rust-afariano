@@ -13,6 +13,7 @@ use axum::middleware;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post, put};
 
+use crate::access::{self, Role};
 use crate::app::Shared;
 use crate::auth;
 use crate::error::{AppError, AppResult, bad};
@@ -58,6 +59,8 @@ pub fn router(state: Shared) -> Router {
         .route("/{ns}/{name}/-/settings/variables", post(settings::save_variable))
         .route("/{ns}/{name}/-/settings/variables/{id}/delete", post(settings::delete_variable))
         .route("/{ns}/{name}/-/settings/delete", post(settings::delete_repo))
+        .route("/{ns}/{name}/-/settings/members", post(settings::save_member))
+        .route("/{ns}/{name}/-/settings/members/{user_id}/delete", post(settings::delete_member))
         .layer(middleware::from_fn_with_state(state.clone(), auth::same_origin));
 
     let git = Router::new()
@@ -147,11 +150,14 @@ pub struct RepoNav {
     pub hue: u16,
     pub initial: String,
     pub tab: &'static str,
+    /// The viewer's role, deciding which tabs and buttons show.
+    pub role: Role,
 }
 
 impl RepoNav {
-    pub fn new(repo: &Repo, tab: &'static str) -> Self {
+    pub fn new(repo: &Repo, role: Role, tab: &'static str) -> Self {
         Self {
+            role,
             path: repo.path(),
             ns: repo.namespace.clone(),
             name: repo.name.clone(),
@@ -160,6 +166,14 @@ impl RepoNav {
             initial: initial(&repo.name),
             tab,
         }
+    }
+
+    pub fn can_write(&self) -> bool {
+        self.role >= Role::Write
+    }
+
+    pub fn can_maintain(&self) -> bool {
+        self.role >= Role::Maintain
     }
 }
 
@@ -190,8 +204,9 @@ pub fn status_label(status: &str, pipeline: bool) -> &'static str {
     }
 }
 
-pub async fn load_repo(state: &Shared, ns: &str, name: &str) -> AppResult<Repo> {
-    state.repo_by_path(ns, name).await?.ok_or(AppError::NotFound)
+/// The repository at `ns/name` and the user's role in it, if that role is at least `need`.
+pub async fn load_repo(state: &Shared, user: &User, ns: &str, name: &str, need: Role) -> AppResult<(Repo, Role)> {
+    access::repo(state, user, ns, name, need).await
 }
 
 /// One stage of a pipeline, summarised as a single status (the list's mini graph).

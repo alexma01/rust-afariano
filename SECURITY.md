@@ -19,15 +19,21 @@ Only the latest release receives security fixes.
 
 Know these before you deploy:
 
-- **Trusted team.** Every signed-in user can read and write every repository,
-  change its CI/CD variables, and manage runners. There are no per-repository
-  permissions yet; give accounts only to people you would give push access to
-  everything.
+- **Repository access.** People open only the repositories they are members
+  of, as *read* (browse, clone, see pipelines and job logs), *write* (also push
+  and run pipelines) or *maintain* (also settings, CI/CD variables and members).
+  Administrators open every repository and alone create and delete repositories
+  and manage users and runners. Branches are not push-protected: anyone with
+  write access can push to a protected branch, so its pipelines receive the
+  protected variables. Give write access only to people you would trust with
+  those secrets.
 - **Runners execute code from the repository.** Any job in `.gitlab-ci.yml`
   runs on whichever runner picks it up, with that runner's access. A runner
   registered with `--privileged` (needed for `docker:dind` services) is
   root-equivalent on its host. Run runners on machines dedicated to CI, and
-  never share one between teams that do not trust each other.
+  never share one between teams that do not trust each other: runners serve
+  every repository, so a job from one repository can reach what jobs from
+  another leave on the same machine.
 - **CI/CD variables** are encrypted at rest with the server's secret key, and
   decrypted when a job starts. Protected variables reach only pipelines on
   protected branches and tags. Masking hides exact values in job logs; it is not

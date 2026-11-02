@@ -19,8 +19,8 @@
     </div>
   </div>
   <div class="actions">
-    {% if can_retry %}<form method="post" action="{{ p.url }}/retry"><button class="btn" type="submit">{% call ui::i("retry") %}{% endcall %}Retry failed jobs</button></form>{% endif %}
-    {% if can_cancel %}<form method="post" action="{{ p.url }}/cancel" data-confirm="Cancel every unfinished job of this pipeline?"><button class="btn danger" type="submit">{% call ui::i("cancel") %}{% endcall %}Cancel pipeline</button></form>{% endif %}
+    {% if nav.can_write() && can_retry %}<form method="post" action="{{ p.url }}/retry"><button class="btn" type="submit">{% call ui::i("retry") %}{% endcall %}Retry failed jobs</button></form>{% endif %}
+    {% if nav.can_write() && can_cancel %}<form method="post" action="{{ p.url }}/cancel" data-confirm="Cancel every unfinished job of this pipeline?"><button class="btn danger" type="submit">{% call ui::i("cancel") %}{% endcall %}Cancel pipeline</button></form>{% endif %}
   </div>
 </div>
 {% if !error.is_empty() %}
@@ -37,8 +37,8 @@
         <span title="{{ j.label() }}">{% call ui::icon(j.vis) %}{% endcall %}</span>
         <a class="name" href="{{ j.url }}" title="{{ j.name }}: {{ j.label() }}">{{ j.name }}</a>
         {% if !j.duration.is_empty() %}<span class="dur">{{ j.duration }}</span>{% endif %}
-        {% if j.can_play %}<form method="post" action="{{ j.url }}/play"><button class="btn icon sm" type="submit" title="Run {{ j.name }}" aria-label="Run {{ j.name }}">{% call ui::i("play") %}{% endcall %}</button></form>{% endif %}
-        {% if j.can_retry && j.status != "success" %}<form method="post" action="{{ j.url }}/retry"><button class="btn icon sm" type="submit" title="Retry {{ j.name }}" aria-label="Retry {{ j.name }}">{% call ui::i("retry") %}{% endcall %}</button></form>{% endif %}
+        {% if nav.can_write() && j.can_play %}<form method="post" action="{{ j.url }}/play"><button class="btn icon sm" type="submit" title="Run {{ j.name }}" aria-label="Run {{ j.name }}">{% call ui::i("play") %}{% endcall %}</button></form>{% endif %}
+        {% if nav.can_write() && j.can_retry && j.status != "success" %}<form method="post" action="{{ j.url }}/retry"><button class="btn icon sm" type="submit" title="Retry {{ j.name }}" aria-label="Retry {{ j.name }}">{% call ui::i("retry") %}{% endcall %}</button></form>{% endif %}
       </div>
     {% endfor %}
     </div>

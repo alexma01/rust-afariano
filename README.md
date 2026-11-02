@@ -129,9 +129,11 @@ Rule expressions support `==`, `!=`, `=~`, `!~`, `&&`, `||`, `!`, parentheses,
 | OpenID Connect | Set `RUST_AFARIANO_OIDC_ISSUER`, `RUST_AFARIANO_OIDC_CLIENT_ID` and, for a confidential client, `RUST_AFARIANO_OIDC_CLIENT_SECRET`. Register `<public url>/auth/oidc/callback` as redirect URI. Authorization code + PKCE, with nonce, issuer and audience checks. |
 | Who gets in through SSO | People with an existing account (same email). `RUST_AFARIANO_ALLOWED_EMAILS` also lets new people in on their first sign-in, as exact emails or `*@yourcompany.com`. |
 
-Every account can read and push to every repository: this is a tool for a team that
-trusts each other. Administrators also manage users and runners. See
-[SECURITY.md](SECURITY.md) for the security model.
+People see only the repositories they are members of (*Settings → Members* of each
+repository), with *read*, *write* (push, run pipelines) or *maintain* (settings,
+variables, members) access. Administrators see every repository, create and delete
+repositories, and manage users and runners. See [SECURITY.md](SECURITY.md) for the
+security model.
 
 ## Configuration
 
@@ -171,9 +173,10 @@ curl -X POST https://git.example.com/api/v1/repos/acme/website/pipelines \
 curl -H "Authorization: Bearer $TOKEN" https://git.example.com/api/v1/repos/acme/website/pipelines/12
 ```
 
-There are also endpoints to create repositories (`POST /api/v1/repos`), set CI/CD
-variables (`PUT /api/v1/repos/{ns}/{name}/variables/{key}`) and, for administrators,
-create runners (`POST /api/v1/runners`). [`contrib/import-repo.sh`](contrib/import-repo.sh)
+There are also endpoints to set CI/CD variables
+(`PUT /api/v1/repos/{ns}/{name}/variables/{key}`, maintain access) and, for
+administrators, to create repositories (`POST /api/v1/repos`) and runners
+(`POST /api/v1/runners`). [`contrib/import-repo.sh`](contrib/import-repo.sh)
 uses them to move a repository over from elsewhere.
 
 ## How it compares

@@ -4,7 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.3] - 2026-11-01
+## [0.2.0] - 2026-11-02
+
+### Added
+
+- Per-repository access. Each repository's *Settings → Members* lists who can open
+  it, as *read* (browse, clone, see pipelines and job logs), *write* (also push,
+  run pipelines and jobs) or *maintain* (also settings, CI/CD variables and
+  members). Administrators open every repository. The web UI, git over HTTP and
+  SSH, and the JSON API all check it; a repository without access answers 404.
+
+### Changed
+
+- Only administrators create and delete repositories (web and `POST /api/v1/repos`).
+- Upgrading keeps everyone's access: every existing account becomes a *maintain*
+  member of every existing repository. Accounts added later start with none.
 
 ### Fixed
 
@@ -60,7 +74,7 @@ First public release.
   clones of a 216 MB repository at once.
 - Container image, `docker-compose.yml`, and prebuilt runner binaries.
 
-[0.1.3]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.3
+[0.2.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.2.0
 [0.1.2]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.2
 [0.1.1]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.1
 [0.1.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.1.0

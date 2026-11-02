@@ -16,9 +16,9 @@
     </div>
   </div>
   <div class="actions">
-    {% if job.can_play %}<form method="post" action="{{ job.url }}/play"><button class="btn confirm" type="submit">{% call ui::i("play") %}{% endcall %}Run job</button></form>{% endif %}
-    {% if job.can_retry %}<form method="post" action="{{ job.url }}/retry"><button class="btn" type="submit">{% call ui::i("retry") %}{% endcall %}Retry</button></form>{% endif %}
-    {% if job.can_cancel %}<form method="post" action="{{ job.url }}/cancel"><button class="btn danger" type="submit">{% call ui::i("cancel") %}{% endcall %}Cancel</button></form>{% endif %}
+    {% if nav.can_write() && job.can_play %}<form method="post" action="{{ job.url }}/play"><button class="btn confirm" type="submit">{% call ui::i("play") %}{% endcall %}Run job</button></form>{% endif %}
+    {% if nav.can_write() && job.can_retry %}<form method="post" action="{{ job.url }}/retry"><button class="btn" type="submit">{% call ui::i("retry") %}{% endcall %}Retry</button></form>{% endif %}
+    {% if nav.can_write() && job.can_cancel %}<form method="post" action="{{ job.url }}/cancel"><button class="btn danger" type="submit">{% call ui::i("cancel") %}{% endcall %}Cancel</button></form>{% endif %}
   </div>
 </div>
 {% if cancel_requested %}<div class="alert info">{% call ui::icon("pending") %}{% endcall %}<div>Cancel requested. The runner stops the job at its next check-in.</div></div>{% endif %}
@@ -26,7 +26,7 @@
 <div class="job-layout">
   <div>
   {% if job.status == "manual" %}
-    <div class="box"><div class="empty"><h2>Manual job</h2><p>It starts only when someone runs it.</p>{% if job.can_play %}<form method="post" action="{{ job.url }}/play"><button class="btn confirm" type="submit">{% call ui::i("play") %}{% endcall %}Run job</button></form>{% endif %}</div></div>
+    <div class="box"><div class="empty"><h2>Manual job</h2><p>It starts only when someone runs it.</p>{% if nav.can_write() && job.can_play %}<form method="post" action="{{ job.url }}/play"><button class="btn confirm" type="submit">{% call ui::i("play") %}{% endcall %}Run job</button></form>{% endif %}</div></div>
   {% else if job.status == "skipped" %}
     <div class="box"><div class="empty"><h2>Skipped</h2><p>An earlier job failed, or this job's rules did not apply.</p></div></div>
   {% else %}

@@ -26,6 +26,58 @@
   </form>
 </section>
 
+<section class="settings-section" id="members">
+  <header><h2>Members</h2><p>Who can open this repository. <strong>Read</strong>: browse, clone, see pipelines and job logs. <strong>Write</strong>: also push and run pipelines. <strong>Maintain</strong>: also these settings, variables and members.</p>
+    <p>Administrators can open every repository. Anyone with write access can push to a protected branch, and its pipelines receive the protected variables.</p></header>
+  <div>
+    <div class="box" style="margin-bottom:18px">
+    {% if members.is_empty() %}
+      <div class="empty"><p>No members yet: only administrators can open it.</p></div>
+    {% else %}
+      <table class="t">
+        <tbody>
+        {% for m in members %}
+          <tr>
+            <td>
+              <div class="repo-row">
+                <span class="avatar-round" aria-hidden="true">{{ m.initial }}</span>
+                <span class="two-line" style="min-width:0">
+                  <span class="cell-title truncate">{% if m.name.is_empty() %}{{ m.email }}{% else %}{{ m.name }}{% endif %}{% if m.is_me %} <span class="faint">(you)</span>{% endif %}</span>
+                  <span class="actions">{% if !m.name.is_empty() %}<span class="cell-sub">{{ m.email }}</span>{% endif %}{% if m.is_admin %}<span class="pill">Admin</span>{% endif %}{% if m.disabled %}{% call ui::badge("canceled", "Disabled") %}{% endcall %}{% endif %}</span>
+                </span>
+              </div>
+            </td>
+            <td class="r">
+              <div class="actions" style="justify-content:flex-end">
+                <form class="actions" method="post" action="/{{ nav.path }}/-/settings/members" style="flex-wrap:nowrap">
+                  <input type="hidden" name="user_id" value="{{ m.user_id }}">
+                  <select name="role" aria-label="Access of {{ m.email }}" style="width:auto;height:30px;min-height:30px;padding-top:4px;padding-bottom:4px">{% for r in roles %}<option value="{{ r.as_str() }}"{% if *r == m.role %} selected{% endif %}>{{ r.label() }}</option>{% endfor %}</select>
+                  <button class="btn sm" type="submit">Change</button>
+                </form>
+                <form method="post" action="/{{ nav.path }}/-/settings/members/{{ m.user_id }}/delete" data-confirm="Remove {{ m.email }} from {{ nav.path }}?{% if m.is_me %} You lose access to it.{% endif %}"><button class="btn icon sm danger" type="submit" aria-label="Remove {{ m.email }}" title="Remove">{% call ui::i("cancel") %}{% endcall %}</button></form>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    </div>
+    {% if candidates.is_empty() %}
+    <p class="hint">Everyone else is already a member or an administrator.{% if user.is_admin %} Add accounts under <a href="/-/admin/users">Users</a>.{% endif %}</p>
+    {% else %}
+    <form class="stack" method="post" action="/{{ nav.path }}/-/settings/members">
+      <h3>Add a member</h3>
+      <div class="row2">
+        <label class="field"><span>Account</span><select name="user_id" required>{% for c in candidates %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}</select></label>
+        <label class="field"><span>Access</span><select name="role">{% for r in roles %}<option value="{{ r.as_str() }}"{% if r.as_str() == "write" %} selected{% endif %}>{{ r.label() }}</option>{% endfor %}</select></label>
+      </div>
+      <div><button class="btn confirm" type="submit">Add member</button></div>
+    </form>
+    {% endif %}
+  </div>
+</section>
+
 <section class="settings-section" id="variables">
   <header><h2>CI/CD variables</h2><p>Passed to every job as environment variables. File variables arrive as a path to a file holding the value.</p></header>
   <div>
@@ -66,6 +118,7 @@
   </div>
 </section>
 
+{% if user.is_admin %}
 <section class="settings-section danger">
   <header><h2>Delete repository</h2><p>Removes the repository, its pipelines and their logs. This cannot be undone.</p></header>
   <form class="stack" method="post" action="/{{ nav.path }}/-/settings/delete" data-confirm="Delete {{ nav.path }} with all its pipelines?">
@@ -73,4 +126,5 @@
     <div><button class="btn danger solid" type="submit">Delete repository</button></div>
   </form>
 </section>
+{% endif %}
 {% endblock %}

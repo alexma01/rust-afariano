@@ -14,6 +14,7 @@ use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::{JobRow, PipelineRow, RepoNav, clean_vars, load_repo, render, user_names};
+use crate::access::Role;
 use crate::app::Shared;
 use crate::auth::CurrentUser;
 use crate::error::{AppError, AppResult, bad};
@@ -49,7 +50,7 @@ pub async fn pipelines(
     Query(q): Query<PageQuery>,
 ) -> AppResult<Response> {
     const PER_PAGE: i64 = 30;
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let page = q.page.max(0);
     let list: Vec<Pipeline> = sqlx::query_as(sql!(
         "SELECT {PIPELINE_COLS} FROM pipelines WHERE repo_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3"
@@ -71,7 +72,7 @@ pub async fn pipelines(
     let refresh = rows.iter().any(PipelineRow::active);
     render(PipelinesPage {
         user,
-        nav: RepoNav::new(&repo, "pipelines"),
+        nav: RepoNav::new(&repo, role, "pipelines"),
         pipelines: rows,
         show_repo: false,
         prev_url: if page > 0 { format!("/{rp}/-/pipelines?page={}", page - 1) } else { String::new() },
@@ -97,14 +98,15 @@ pub async fn new_pipeline_form(
     CurrentUser(user): CurrentUser,
     Path((ns, name)): Path<(String, String)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
-    new_pipeline_page(&state, user, &repo, repo.default_branch.clone(), String::new(), Vec::new()).await
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Write).await?;
+    new_pipeline_page(&state, user, &repo, role, repo.default_branch.clone(), String::new(), Vec::new()).await
 }
 
 async fn new_pipeline_page(
     state: &Shared,
     user: User,
     repo: &Repo,
+    role: Role,
     selected: String,
     error: String,
     mut vars: Vec<PipelineVar>,
@@ -115,7 +117,7 @@ async fn new_pipeline_page(
     }
     render(NewPipelinePage {
         user,
-        nav: RepoNav::new(repo, "pipelines"),
+        nav: RepoNav::new(repo, role, "pipelines"),
         branches: refs.iter().filter(|r| !r.is_tag()).map(|r| r.short().to_string()).collect(),
         tags: refs.iter().filter(|r| r.is_tag()).map(|r| r.short().to_string()).collect(),
         selected,
@@ -131,7 +133,7 @@ pub async fn run_pipeline(
     Path((ns, name)): Path<(String, String)>,
     Form(form): Form<Vec<(String, String)>>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Write).await?;
     let mut target = String::new();
     let mut keys = Vec::new();
     let mut values = Vec::new();
@@ -151,13 +153,14 @@ pub async fn run_pipeline(
     };
     let vars_clean = match clean_vars(vars.clone()) {
         Ok(v) => v,
-        Err(AppError::BadRequest(msg)) => return new_pipeline_page(&state, user, &repo, target, msg, vars).await,
+        Err(AppError::BadRequest(msg)) => return new_pipeline_page(&state, user, &repo, role, target, msg, vars).await,
         Err(e) => return Err(e),
     };
     let full = format!("refs/{}/{ref_name}", if is_tag { "tags" } else { "heads" });
     let git = state.git(repo.id);
     let Some(sha) = git.resolve(&full).await? else {
-        return new_pipeline_page(&state, user, &repo, target, format!("`{ref_name}` does not exist."), vars).await;
+        return new_pipeline_page(&state, user, &repo, role, target, format!("`{ref_name}` does not exist."), vars)
+            .await;
     };
     let np = NewPipeline {
         repo: &repo,
@@ -176,7 +179,7 @@ pub async fn run_pipeline(
         Created::Filtered(reason) => format!("No pipeline was created: {reason}."),
         Created::NoConfig => format!("There is no {CI_FILE} on `{ref_name}`."),
     };
-    new_pipeline_page(&state, user, &repo, target, msg, vars).await
+    new_pipeline_page(&state, user, &repo, role, target, msg, vars).await
 }
 
 struct StageCol {
@@ -214,7 +217,7 @@ pub async fn pipeline(
     CurrentUser(user): CurrentUser,
     Path((ns, name, iid)): Path<(String, String, i32)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let p = load_pipeline(&state, &repo, iid).await?;
     let jobs: Vec<Job> = sqlx::query_as(sql!(
         "SELECT {JOB_COLS} FROM jobs WHERE pipeline_id = $1 AND NOT retried ORDER BY stage_idx, id"
@@ -238,7 +241,7 @@ pub async fn pipeline(
     let refresh = row.active() || jobs.iter().any(|j| matches!(j.status.as_str(), "pending" | "running"));
     render(PipelinePage {
         user,
-        nav: RepoNav::new(&repo, "pipelines"),
+        nav: RepoNav::new(&repo, role, "pipelines"),
         error: p.error.clone().unwrap_or_default(),
         variables: p.variables.0.iter().map(|v| v.key.clone()).collect(),
         commit_url: format!("/{rp}/-/commit/{}", p.sha),
@@ -256,7 +259,7 @@ pub async fn pipeline_action(
     CurrentUser(user): CurrentUser,
     Path((ns, name, iid, action)): Path<(String, String, i32, String)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Write).await?;
     let p = load_pipeline(&state, &repo, iid).await?;
     match action.as_str() {
         "cancel" => pipelines::cancel_pipeline(&state, p.id).await?,
@@ -299,7 +302,7 @@ pub async fn job(
     CurrentUser(user): CurrentUser,
     Path((ns, name, id)): Path<(String, String, i64)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let job = load_job(&state, &repo, id).await?;
     let p = pipelines::get_pipeline(&state, job.pipeline_id).await?;
     let rp = repo.path();
@@ -317,7 +320,7 @@ pub async fn job(
     let spec = &job.spec.0;
     render(JobPage {
         user,
-        nav: RepoNav::new(&repo, "pipelines"),
+        nav: RepoNav::new(&repo, role, "pipelines"),
         pipeline: PipelineRow::new(&p, &rp, None),
         runner,
         image: spec.image.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
@@ -339,10 +342,10 @@ pub async fn job(
 
 pub async fn job_raw(
     State(state): State<Shared>,
-    CurrentUser(_user): CurrentUser,
+    CurrentUser(user): CurrentUser,
     Path((ns, name, id)): Path<(String, String, i64)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let job = load_job(&state, &repo, id).await?;
     let data = state.logs.read(job.id, 0, (rust_afariano_proto::MAX_LOG_SIZE + 4096) as usize).await?;
     let text = strip_ansi(&String::from_utf8_lossy(&data));
@@ -372,7 +375,7 @@ pub async fn job_action(
     CurrentUser(user): CurrentUser,
     Path((ns, name, id, action)): Path<(String, String, i64, String)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Write).await?;
     let job = load_job(&state, &repo, id).await?;
     let target = match action.as_str() {
         "play" => {
@@ -393,10 +396,10 @@ pub async fn job_action(
 /// them, then an `end` event with the final status.
 pub async fn job_stream(
     State(state): State<Shared>,
-    CurrentUser(_user): CurrentUser,
+    CurrentUser(user): CurrentUser,
     Path((ns, name, id)): Path<(String, String, i64)>,
 ) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Read).await?;
     let job = load_job(&state, &repo, id).await?;
     let (tx, rx) = mpsc::channel::<Event>(32);
     tokio::spawn(stream_log(state, job, tx));
@@ -515,5 +518,43 @@ mod tests {
     #[test]
     fn ansi_strip() {
         assert_eq!(strip_ansi("\x1b[32;1m$ echo\x1b[0m hi"), "$ echo hi");
+    }
+
+    /// Readers see no Run pipeline button and no Settings tab; maintainers see both.
+    #[test]
+    fn pipelines_page_follows_role() {
+        let repo = Repo {
+            id: 1,
+            namespace: "acme".into(),
+            name: "web".into(),
+            description: String::new(),
+            default_branch: "main".into(),
+            protected_branches: "main".into(),
+            pipelines_on_push: true,
+            created_at: chrono::Utc::now(),
+            pushed_at: None,
+        };
+        let page = |role| {
+            PipelinesPage {
+                user: User { id: 2, email: "ana@example.com".into(), name: String::new(), is_admin: false },
+                nav: RepoNav::new(&repo, role, "pipelines"),
+                pipelines: Vec::new(),
+                show_repo: false,
+                prev_url: String::new(),
+                next_url: String::new(),
+                refresh: false,
+            }
+            .render()
+            .unwrap()
+        };
+        let read = page(Role::Read);
+        assert!(!read.contains("/acme/web/-/pipelines/new"));
+        assert!(!read.contains("/acme/web/-/settings"));
+        let write = page(Role::Write);
+        assert!(write.contains("/acme/web/-/pipelines/new"));
+        assert!(!write.contains("/acme/web/-/settings"));
+        let maintain = page(Role::Maintain);
+        assert!(maintain.contains("/acme/web/-/pipelines/new"));
+        assert!(maintain.contains("/acme/web/-/settings"));
     }
 }

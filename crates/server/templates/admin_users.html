@@ -4,7 +4,7 @@
 {% block on_users %}on{% endblock %}
 {% block crumbs %}<span class="here">Users</span>{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Users</h1><p class="lead">Everyone here can read and push to every repository. Administrators also manage users and runners.</p></div></div>
+<div class="page-head"><div><h1>Users</h1><p class="lead">People open only the repositories they are members of (each repository's Settings → Members). Administrators open every repository and manage users, runners and repositories.</p></div></div>
 {% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
 {% if !notice.is_empty() %}<div class="alert ok">{% call ui::icon("success") %}{% endcall %}<div>{{ notice }}</div></div>{% endif %}
 <div class="box pop">

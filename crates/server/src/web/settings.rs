@@ -7,6 +7,7 @@ use rust_afariano_proto as proto;
 use serde::Deserialize;
 
 use super::{RepoNav, load_repo, render};
+use crate::access::{self, Role};
 use crate::app::Shared;
 use crate::auth::{AdminUser, CurrentUser};
 use crate::error::{AppError, AppResult, bad};
@@ -350,6 +351,23 @@ struct VarRow {
     preview: String,
 }
 
+struct MemberRow {
+    user_id: i64,
+    email: String,
+    name: String,
+    initial: String,
+    role: Role,
+    is_admin: bool,
+    disabled: bool,
+    is_me: bool,
+}
+
+/// Someone who can be added: an active account that is neither a member nor an administrator.
+struct Candidate {
+    id: i64,
+    label: String,
+}
+
 #[derive(Template)]
 #[template(path = "repo_settings.html")]
 struct RepoSettingsPage {
@@ -358,11 +376,48 @@ struct RepoSettingsPage {
     repo: Repo,
     branches: Vec<String>,
     variables: Vec<VarRow>,
+    members: Vec<MemberRow>,
+    candidates: Vec<Candidate>,
+    roles: [Role; 3],
     error: String,
     notice: String,
 }
 
 async fn settings_page(state: &Shared, user: User, repo: Repo, error: String, notice: String) -> AppResult<Response> {
+    let members: Vec<(i64, String, String, bool, bool, String)> = sqlx::query_as(
+        "SELECT u.id, u.email, u.name, u.is_admin, u.disabled, m.role FROM repo_members m JOIN users u ON u.id = m.user_id \
+         WHERE m.repo_id = $1 ORDER BY lower(COALESCE(NULLIF(u.name, ''), u.email))",
+    )
+    .bind(repo.id)
+    .fetch_all(&state.db)
+    .await?;
+    let members = members
+        .into_iter()
+        .map(|(user_id, email, name, is_admin, disabled, role)| MemberRow {
+            initial: super::initial(if name.is_empty() { &email } else { &name }),
+            role: Role::parse(&role).unwrap_or(Role::Read),
+            is_me: user_id == user.id,
+            user_id,
+            email,
+            name,
+            is_admin,
+            disabled,
+        })
+        .collect();
+    let candidates: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT id, email, name FROM users WHERE NOT disabled AND NOT is_admin \
+         AND id NOT IN (SELECT user_id FROM repo_members WHERE repo_id = $1) ORDER BY lower(email)",
+    )
+    .bind(repo.id)
+    .fetch_all(&state.db)
+    .await?;
+    let candidates = candidates
+        .into_iter()
+        .map(|(id, email, name)| Candidate {
+            id,
+            label: if name.is_empty() { email } else { format!("{name} ({email})") },
+        })
+        .collect();
     let vars: Vec<Variable> = sqlx::query_as(
         "SELECT id, repo_id, key, value, file, protected, masked, environment_scope FROM variables WHERE repo_id = $1 ORDER BY key, environment_scope",
     )
@@ -372,7 +427,10 @@ async fn settings_page(state: &Shared, user: User, repo: Repo, error: String, no
     let refs = state.git(repo.id).refs().await?;
     render(RepoSettingsPage {
         user,
-        nav: RepoNav::new(&repo, "settings"),
+        nav: RepoNav::new(&repo, Role::Maintain, "settings"),
+        members,
+        candidates,
+        roles: Role::ALL,
         branches: refs.iter().filter(|r| !r.is_tag()).map(|r| r.short().to_string()).collect(),
         variables: vars
             .into_iter()
@@ -398,7 +456,7 @@ pub async fn repo_settings(
     CurrentUser(user): CurrentUser,
     Path((ns, name)): Path<(String, String)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
     settings_page(&state, user, repo, String::new(), String::new()).await
 }
 
@@ -418,7 +476,7 @@ pub async fn update_repo(
     Path((ns, name)): Path<(String, String)>,
     Form(f): Form<RepoForm>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
     let branch = f.default_branch.trim().to_string();
     if !super::repo::valid_branch(&branch) {
         return settings_page(&state, user, repo, "Default branch name is not valid.".into(), String::new()).await;
@@ -458,7 +516,7 @@ pub async fn save_variable(
     Path((ns, name)): Path<(String, String)>,
     Form(f): Form<VariableForm>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
     let input = crate::ops::VariableInput {
         key: f.key,
         value: f.value,
@@ -475,10 +533,10 @@ pub async fn save_variable(
 
 pub async fn delete_variable(
     State(state): State<Shared>,
-    CurrentUser(_user): CurrentUser,
+    CurrentUser(user): CurrentUser,
     Path((ns, name, id)): Path<(String, String, i64)>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
     sqlx::query("DELETE FROM variables WHERE id = $1 AND repo_id = $2")
         .bind(id)
         .bind(repo.id)
@@ -488,17 +546,81 @@ pub async fn delete_variable(
 }
 
 #[derive(Deserialize)]
+pub struct MemberForm {
+    user_id: i64,
+    role: String,
+}
+
+/// Add a member, or change a member's role.
+pub async fn save_member(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name)): Path<(String, String)>,
+    Form(f): Form<MemberForm>,
+) -> AppResult<Response> {
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    let role = Role::parse(&f.role).ok_or_else(|| bad("unknown role"))?;
+    let who: Option<(String, String)> =
+        sqlx::query_as("SELECT email, name FROM users WHERE id = $1").bind(f.user_id).fetch_optional(&state.db).await?;
+    let Some((email, who_name)) = who else {
+        return settings_page(&state, user, repo, "That account no longer exists.".into(), String::new()).await;
+    };
+    sqlx::query(
+        "INSERT INTO repo_members (repo_id, user_id, role) VALUES ($1, $2, $3) \
+         ON CONFLICT (repo_id, user_id) DO UPDATE SET role = EXCLUDED.role",
+    )
+    .bind(repo.id)
+    .bind(f.user_id)
+    .bind(role.as_str())
+    .execute(&state.db)
+    .await?;
+    tracing::info!(repo = %repo.path(), member = %email, role = role.as_str(), by = %user.email, "member saved");
+    let display = if who_name.is_empty() { email } else { who_name };
+    after_member_change(&state, user, repo, format!("{display} now has {} access.", role.label().to_lowercase())).await
+}
+
+pub async fn delete_member(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name, member)): Path<(String, String, i64)>,
+) -> AppResult<Response> {
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    let email: Option<String> = sqlx::query_scalar(
+        "DELETE FROM repo_members m USING users u WHERE m.repo_id = $1 AND m.user_id = $2 AND u.id = m.user_id \
+         RETURNING u.email",
+    )
+    .bind(repo.id)
+    .bind(member)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some(email) = email else {
+        return settings_page(&state, user, repo, String::new(), String::new()).await;
+    };
+    tracing::info!(repo = %repo.path(), member = %email, by = %user.email, "member removed");
+    after_member_change(&state, user, repo, format!("{email} was removed.")).await
+}
+
+/// Someone who lowered or removed their own access cannot see this page any more.
+async fn after_member_change(state: &Shared, user: User, repo: Repo, notice: String) -> AppResult<Response> {
+    match access::role(state, &user, repo.id).await? {
+        Some(Role::Maintain) => settings_page(state, user, repo, String::new(), notice).await,
+        Some(_) => Ok(Redirect::to(&format!("/{}", repo.path())).into_response()),
+        None => Ok(Redirect::to("/").into_response()),
+    }
+}
+
+#[derive(Deserialize)]
 pub struct DeleteForm {
     confirm: String,
 }
 
 pub async fn delete_repo(
     State(state): State<Shared>,
-    CurrentUser(user): CurrentUser,
+    AdminUser(user): AdminUser,
     Path((ns, name)): Path<(String, String)>,
     Form(f): Form<DeleteForm>,
 ) -> AppResult<Response> {
-    let repo = load_repo(&state, &ns, &name).await?;
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
     if f.confirm.trim() != repo.path() {
         return settings_page(&state, user, repo, "Type the full path to confirm deletion.".into(), String::new())
             .await;

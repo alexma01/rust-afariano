@@ -151,7 +151,7 @@ pub async fn trigger_pipeline(
     TokenUser2(user): TokenUser2,
     Json(body): Json<TriggerBody>,
 ) -> AppResult<Response> {
-    let repo = state.repo_by_path(&ns, &name).await?.ok_or(AppError::NotFound)?;
+    let (repo, _) = crate::access::repo(&state, &user, &ns, &name, crate::access::Role::Write).await?;
     let git = state.git(repo.id);
     let (full, is_tag) = if git.resolve(&format!("refs/heads/{}", body.ref_name)).await?.is_some() {
         (format!("refs/heads/{}", body.ref_name), false)

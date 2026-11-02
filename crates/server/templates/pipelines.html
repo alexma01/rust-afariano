@@ -7,13 +7,17 @@
 {% if refresh %}<span data-refresh="5" hidden></span>{% endif %}
 <div class="page-head">
   <h1>Pipelines</h1>
-  <div class="actions"><a class="btn confirm" href="/{{ nav.path }}/-/pipelines/new">{% call ui::i("play") %}{% endcall %}Run pipeline</a></div>
+  {% if nav.can_write() %}<div class="actions"><a class="btn confirm" href="/{{ nav.path }}/-/pipelines/new">{% call ui::i("play") %}{% endcall %}Run pipeline</a></div>{% endif %}
 </div>
 {% if pipelines.is_empty() %}
 <div class="box"><div class="empty">
   <h2>No pipelines yet</h2>
+  {% if nav.can_write() %}
   <p>Push a <code>.gitlab-ci.yml</code>, or start one by hand on any branch.</p>
   <a class="btn confirm" href="/{{ nav.path }}/-/pipelines/new">Run pipeline</a>
+  {% else %}
+  <p>Pipelines appear here when someone pushes a <code>.gitlab-ci.yml</code>.</p>
+  {% endif %}
 </div></div>
 {% else %}
 {% include "pipeline_rows.html" %}

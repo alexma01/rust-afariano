@@ -46,6 +46,12 @@ Git hosting + CI pipelines, nothing else. Target: the server stays under
   while it runs). Without valid credentials every repository path answers 401.
 - git over SSH: public keys added in the UI. Disabled accounts lose web, token and
   SSH access at once.
+- Repository access: `repo_members (repo_id, user_id, role)` with `read` < `write` <
+  `maintain`; administrators count as `maintain` everywhere without a row. Every
+  web page, git service (HTTP and SSH) and API call checks it (`access.rs`). No
+  role answers 404, like a missing repository, so names cannot be probed; too low
+  a role answers 403. Pushing needs `write`, settings, variables and members
+  `maintain`; creating and deleting repositories is for administrators.
 - Runners: `rfr_…` token shown once when the runner is created (admins only).
 - All tokens are stored as SHA-256. CI/CD variable values are stored encrypted
   with AES-256-GCM (`enc:v1:` + base64(nonce ‖ ciphertext)).

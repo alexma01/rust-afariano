@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::access::{self, Role};
 use crate::app::Shared;
 use crate::auth::TokenUser2;
 use crate::error::{AppError, AppResult, bad};
@@ -30,6 +31,9 @@ pub async fn create_repo(
     TokenUser2(user): TokenUser2,
     Json(b): Json<NewRepo>,
 ) -> AppResult<Response> {
+    if !user.is_admin {
+        return Err(AppError::Forbidden);
+    }
     let ns = b.namespace.trim();
     let name = b.name.trim();
     let branch = b.default_branch.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("main");
@@ -64,11 +68,11 @@ pub struct VariableBody {
 /// `PUT /api/v1/repos/{ns}/{name}/variables/{key}` — create or replace (per scope).
 pub async fn put_variable(
     State(state): State<Shared>,
-    TokenUser2(_user): TokenUser2,
+    TokenUser2(user): TokenUser2,
     Path((ns, name, key)): Path<(String, String, String)>,
     Json(b): Json<VariableBody>,
 ) -> AppResult<StatusCode> {
-    let repo = state.repo_by_path(&ns, &name).await?.ok_or(AppError::NotFound)?;
+    let (repo, _) = access::repo(&state, &user, &ns, &name, Role::Maintain).await?;
     let input = ops::VariableInput {
         key,
         value: b.value,
@@ -111,10 +115,10 @@ pub async fn create_runner(
 /// `GET /api/v1/repos/{ns}/{name}/pipelines/{iid}` — status and jobs.
 pub async fn get_pipeline(
     State(state): State<Shared>,
-    TokenUser2(_user): TokenUser2,
+    TokenUser2(user): TokenUser2,
     Path((ns, name, iid)): Path<(String, String, i32)>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let repo = state.repo_by_path(&ns, &name).await?.ok_or(AppError::NotFound)?;
+    let (repo, _) = access::repo(&state, &user, &ns, &name, Role::Read).await?;
     let p: Pipeline = sqlx::query_as(sql!("SELECT {PIPELINE_COLS} FROM pipelines WHERE repo_id = $1 AND iid = $2"))
         .bind(repo.id)
         .bind(iid)

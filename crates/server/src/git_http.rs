@@ -15,6 +15,7 @@ use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 
+use crate::access::{self, Role};
 use crate::app::Shared;
 use crate::auth;
 use crate::error::{AppError, AppResult, bad};
@@ -57,7 +58,11 @@ async fn access(
     let principal = authenticate(state, headers).await?;
     let repo = state.repo_by_path(ns, name).await?;
     match (&principal, repo) {
-        (Principal::User(_), Some(repo)) => Ok((repo, principal)),
+        (Principal::User(user), Some(repo)) => {
+            let need = if service == Service::Receive { Role::Write } else { Role::Read };
+            access::require(state, user, &repo, need).await?;
+            Ok((repo, principal))
+        }
         (Principal::User(_), None) => Err(AppError::NotFound),
         (Principal::Job { repo_id }, Some(repo)) if *repo_id == repo.id && service == Service::Upload => {
             Ok((repo, principal))

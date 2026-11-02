@@ -7,6 +7,7 @@ macro_rules! sql {
     };
 }
 
+mod access;
 mod accounts;
 mod api;
 mod app;

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Create a repository on rust-afariano (if missing) and push one ref of a local
-# checkout into it. Uses the JSON API with a personal access token.
+# checkout into it. Uses the JSON API with an administrator's personal access token
+# (only administrators create repositories).
 #
 #   URL=https://git.example.com RUST_AFARIANO_TOKEN=rfp_… \
 #     contrib/import-repo.sh team/website ../website origin/main

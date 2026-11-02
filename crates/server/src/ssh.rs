@@ -12,6 +12,7 @@ use russh::server::{Auth, ChannelOpenHandle, Msg, Server as _, Session, Verified
 use russh::{Channel, ChannelId};
 use tokio::io::AsyncWriteExt;
 
+use crate::access::{self, Role};
 use crate::app::{AppState, Shared};
 use crate::git::{git_cmd, repo_dir};
 use crate::models::User;
@@ -125,7 +126,7 @@ impl russh::server::Handler for Conn {
         let fp = fingerprint(key.public_key);
         let user = sqlx::query_as::<_, User>(
             "UPDATE ssh_keys k SET last_used_at = now() FROM users u WHERE k.fingerprint = $1 AND u.id = k.user_id \
-             AND NOT u.disabled RETURNING u.id, u.email, u.name",
+             AND NOT u.disabled RETURNING u.id, u.email, u.name, u.is_admin",
         )
         .bind(&fp)
         .fetch_optional(&self.state.db)
@@ -201,10 +202,25 @@ impl russh::server::Handler for Conn {
             tokio::spawn(fail(channel, format!("rust-afariano only runs git fetch/push (got `{command}`).\n")));
             return Ok(());
         };
-        let Some(repo) = self.state.repo_by_path(&ns, &name).await? else {
-            session.channel_success(channel_id)?;
-            tokio::spawn(fail(channel, format!("Repository {ns}/{name} not found.\n")));
-            return Ok(());
+        let repo = self.state.repo_by_path(&ns, &name).await?;
+        let need = if service == "receive-pack" { Role::Write } else { Role::Read };
+        let role = match &repo {
+            Some(r) => access::role(&self.state, &user, r.id).await?,
+            None => None,
+        };
+        let allowed = match (repo, role) {
+            (Some(repo), Some(role)) if role >= need => Ok(repo),
+            // Same answer as a missing repository, so names cannot be probed.
+            (_, None) | (None, _) => Err(format!("Repository {ns}/{name} not found.\n")),
+            (Some(_), Some(_)) => Err(format!("You can read {ns}/{name} but not push to it.\n")),
+        };
+        let repo = match allowed {
+            Ok(repo) => repo,
+            Err(msg) => {
+                session.channel_success(channel_id)?;
+                tokio::spawn(fail(channel, msg));
+                return Ok(());
+            }
         };
         session.channel_success(channel_id)?;
         let state = self.state.clone();
