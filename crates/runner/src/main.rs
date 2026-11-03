@@ -50,12 +50,17 @@ enum Cmd {
         /// Run job and service containers privileged (needed for docker:dind).
         #[arg(long)]
         privileged: bool,
+        /// Where checkouts live (absolute). Give each runner on one host its own.
+        #[arg(long)]
+        builds_dir: Option<PathBuf>,
     },
     /// Poll the server and run jobs until stopped.
     Run,
     /// Run as a service: launchd LaunchAgent (macOS) or systemd unit (Linux, root).
+    /// With `--config` other than the default, the service is named after the runner,
+    /// so several runners can run on one host.
     Install,
-    /// Remove the service.
+    /// Remove the service (of `--config`, when given).
     Uninstall,
     /// Debug: run a JobSpec JSON file without a server, log to stdout.
     ExecLocal {
@@ -109,7 +114,7 @@ fn main() {
 async fn real_main(cli: Cli) -> Result<i32> {
     let path = cli.config.clone().unwrap_or_else(config::config_path);
     match cli.cmd {
-        Cmd::Register { url, token, executor, name, concurrent, privileged } => {
+        Cmd::Register { url, token, executor, name, concurrent, privileged, builds_dir } => {
             if !token.starts_with(rust_afariano_proto::RUNNER_TOKEN_PREFIX) {
                 bail!("runner tokens start with {}", rust_afariano_proto::RUNNER_TOKEN_PREFIX);
             }
@@ -126,6 +131,12 @@ async fn real_main(cli: Cli) -> Result<i32> {
             }
             if privileged {
                 cfg.docker.privileged = true;
+            }
+            if let Some(dir) = builds_dir {
+                if !dir.is_absolute() {
+                    bail!("--builds-dir must be an absolute path");
+                }
+                cfg.builds_dir = Some(dir);
             }
             let client = client::Client::new(&cfg.url, &cfg.token)?;
             let info = client.verify(&run::hello(&cfg)).await?;
@@ -152,7 +163,7 @@ async fn real_main(cli: Cli) -> Result<i32> {
             Ok(0)
         }
         Cmd::Uninstall => {
-            service::uninstall()?;
+            service::uninstall(&path)?;
             Ok(0)
         }
         Cmd::ExecLocal { job, dir, executor, privileged } => {

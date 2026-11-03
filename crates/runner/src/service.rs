@@ -1,4 +1,8 @@
 //! `install` / `uninstall`: launchd LaunchAgent (macOS) or systemd unit (Linux).
+//!
+//! The default config file gets the plain service name. Any other config file
+//! (`--config`) gets a service named after its runner, so several runners can live
+//! on one host, e.g. a docker and a shell executor on the same Mac.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -10,7 +14,7 @@ use crate::config::{self, CONFIG_ENV};
 const LABEL: &str = "io.github.frank10gm.rust-afariano-runner";
 /// Label used by early builds; `install`/`uninstall` remove such an agent.
 const LEGACY_LABEL: &str = "com.hartwellbridge.rust-afariano-runner";
-const UNIT: &str = "/etc/systemd/system/rust-afariano-runner.service";
+const UNIT_DIR: &str = "/etc/systemd/system";
 const UNIT_NAME: &str = "rust-afariano-runner";
 /// Running jobs get `shutdown_timeout_secs` (default 600) on stop; give the
 /// service manager a bit more before it kills us.
@@ -28,48 +32,117 @@ fn current_exe() -> Result<PathBuf> {
     Ok(exe)
 }
 
-fn require_config(path: &Path) -> Result<()> {
+/// Names of one runner's service: launchd label, systemd unit and log file.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Service {
+    /// `None` for the default config file, else the sanitized runner name.
+    suffix: Option<String>,
+}
+
+impl Service {
+    /// The service for `config_path`: plain for the built-in default config file
+    /// (whatever `$RUST_AFARIANO_RUNNER_CONFIG` says), else suffixed with `runner_name`.
+    pub fn for_config(config_path: &Path, default_path: &Path, runner_name: &str) -> Result<Self> {
+        if same_file(config_path, default_path) {
+            return Ok(Self { suffix: None });
+        }
+        let suffix: String = runner_name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '-' })
+            .collect();
+        let suffix = suffix.trim_matches(|c| c == '-' || c == '.').to_string();
+        if suffix.is_empty() {
+            bail!("the runner name {runner_name:?} cannot name a service: set `name` in {}", config_path.display());
+        }
+        Ok(Self { suffix: Some(suffix) })
+    }
+
+    fn with_suffix(&self, base: &str, sep: char) -> String {
+        match &self.suffix {
+            None => base.to_string(),
+            Some(s) => format!("{base}{sep}{s}"),
+        }
+    }
+
+    pub fn label(&self) -> String {
+        self.with_suffix(LABEL, '.')
+    }
+
+    pub fn unit_name(&self) -> String {
+        self.with_suffix(UNIT_NAME, '-')
+    }
+
+    fn unit_path(&self) -> PathBuf {
+        Path::new(UNIT_DIR).join(format!("{}.service", self.unit_name()))
+    }
+
+    fn log_path(&self, home: &Path) -> PathBuf {
+        home.join("Library/Logs").join(format!("{}.log", self.with_suffix(UNIT_NAME, '-')))
+    }
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+}
+
+/// The config file used when neither `--config` nor `$RUST_AFARIANO_RUNNER_CONFIG` is given.
+fn builtin_config_path() -> PathBuf {
+    config::select_config_path(None, config::is_root(), &config::home_dir())
+}
+
+fn require_config(path: &Path) -> Result<config::Config> {
     if !path.exists() {
         bail!("{} does not exist: run `rust-afariano-runner register --url … --token …` first", path.display());
     }
-    config::Config::load(path)?;
-    Ok(())
+    config::Config::load(path)
 }
 
 pub fn install(config_path: &Path) -> Result<()> {
-    require_config(config_path)?;
+    let cfg = require_config(config_path)?;
     let config_path = config_path.canonicalize()?;
+    let service = Service::for_config(&config_path, &builtin_config_path(), &cfg.name)?;
     let exe = current_exe()?;
     if cfg!(target_os = "macos") {
-        install_launchd(&exe, &config_path)
+        install_launchd(&exe, &config_path, &service)
     } else if cfg!(target_os = "linux") {
-        install_systemd(&exe, &config_path)
+        install_systemd(&exe, &config_path, &service)
     } else {
         bail!("install supports macOS and Linux only")
     }
 }
 
-pub fn uninstall() -> Result<()> {
+pub fn uninstall(config_path: &Path) -> Result<()> {
+    let default = builtin_config_path();
+    let service = if same_file(config_path, &default) {
+        Service { suffix: None }
+    } else {
+        // The runner name in the file names the service.
+        let cfg = require_config(config_path)?;
+        Service::for_config(config_path, &default, &cfg.name)?
+    };
     if cfg!(target_os = "macos") {
-        let uid = uid();
-        let plist = plist_path(LABEL);
-        let _ = Command::new("launchctl").args(["bootout", &format!("gui/{uid}/{LABEL}")]).status();
+        let label = service.label();
+        let plist = plist_path(&label);
+        let _ = Command::new("launchctl").args(["bootout", &format!("gui/{}/{label}", uid())]).status();
         if plist.exists() {
             std::fs::remove_file(&plist)?;
         }
-        remove_legacy_agent()?;
+        if service.suffix.is_none() {
+            remove_legacy_agent()?;
+        }
         println!("Removed {}", plist.display());
         Ok(())
     } else if cfg!(target_os = "linux") {
         if !config::is_root() {
             bail!("uninstall needs root (sudo)");
         }
-        let _ = Command::new("systemctl").args(["disable", "--now", UNIT_NAME]).status();
-        if Path::new(UNIT).exists() {
-            std::fs::remove_file(UNIT)?;
+        let unit = service.unit_path();
+        let _ = Command::new("systemctl").args(["disable", "--now", &service.unit_name()]).status();
+        if unit.exists() {
+            std::fs::remove_file(&unit)?;
         }
         let _ = Command::new("systemctl").arg("daemon-reload").status();
-        println!("Removed {UNIT}");
+        println!("Removed {}", unit.display());
         Ok(())
     } else {
         bail!("uninstall supports macOS and Linux only")
@@ -103,8 +176,9 @@ fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-pub fn launchd_plist(exe: &Path, config: &Path, home: &Path) -> String {
-    let log = home.join("Library/Logs/rust-afariano-runner.log");
+pub fn launchd_plist(exe: &Path, config: &Path, home: &Path, service: &Service) -> String {
+    let label = xml_escape(&service.label());
+    let log = service.log_path(home);
     let e = |p: &Path| xml_escape(&p.display().to_string());
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -112,7 +186,7 @@ pub fn launchd_plist(exe: &Path, config: &Path, home: &Path) -> String {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>{LABEL}</string>
+  <string>{label}</string>
   <key>ProgramArguments</key>
   <array>
     <string>{exe}</string>
@@ -149,7 +223,7 @@ pub fn launchd_plist(exe: &Path, config: &Path, home: &Path) -> String {
     )
 }
 
-fn install_launchd(exe: &Path, config: &Path) -> Result<()> {
+fn install_launchd(exe: &Path, config: &Path, service: &Service) -> Result<()> {
     if config::is_root() {
         bail!(
             "on macOS run install as the user that runs Docker Desktop, not root: \
@@ -157,14 +231,18 @@ fn install_launchd(exe: &Path, config: &Path) -> Result<()> {
         );
     }
     let home = config::home_dir();
-    remove_legacy_agent()?;
-    let plist = plist_path(LABEL);
+    if service.suffix.is_none() {
+        remove_legacy_agent()?;
+    }
+    let label = service.label();
+    let plist = plist_path(&label);
     std::fs::create_dir_all(plist.parent().unwrap())?;
     std::fs::create_dir_all(home.join("Library/Logs"))?;
-    std::fs::write(&plist, launchd_plist(exe, config, &home))
+    std::fs::write(&plist, launchd_plist(exe, config, &home, service))
         .with_context(|| format!("writing {}", plist.display()))?;
     let domain = format!("gui/{}", uid());
-    let service = format!("{domain}/{LABEL}");
+    let log = service.log_path(&home);
+    let service = format!("{domain}/{label}");
     // Replace a running copy, if any.
     let _ = Command::new("launchctl").args(["bootout", &service]).status();
     let _ = Command::new("launchctl").args(["enable", &service]).status();
@@ -177,7 +255,7 @@ fn install_launchd(exe: &Path, config: &Path) -> Result<()> {
         );
     }
     println!("Installed {}", plist.display());
-    println!("Logs: {}", home.join("Library/Logs/rust-afariano-runner.log").display());
+    println!("Logs: {}", log.display());
     println!("Status: launchctl print {service}");
     Ok(())
 }
@@ -205,19 +283,21 @@ WantedBy=multi-user.target
     )
 }
 
-fn install_systemd(exe: &Path, config: &Path) -> Result<()> {
+fn install_systemd(exe: &Path, config: &Path, service: &Service) -> Result<()> {
     if !config::is_root() {
         bail!("install needs root on Linux (sudo rust-afariano-runner install)");
     }
-    std::fs::write(UNIT, systemd_unit(exe, config)).with_context(|| format!("writing {UNIT}"))?;
-    for args in [&["daemon-reload"][..], &["enable", UNIT_NAME][..], &["restart", UNIT_NAME][..]] {
+    let unit = service.unit_path();
+    let name = service.unit_name();
+    std::fs::write(&unit, systemd_unit(exe, config)).with_context(|| format!("writing {}", unit.display()))?;
+    for args in [&["daemon-reload"][..], &["enable", &name][..], &["restart", &name][..]] {
         let st = Command::new("systemctl").args(args).status()?;
         if !st.success() {
             bail!("systemctl {} failed ({st})", args.join(" "));
         }
     }
-    println!("Installed {UNIT}");
-    println!("Logs: journalctl -u {UNIT_NAME} -f");
+    println!("Installed {}", unit.display());
+    println!("Logs: journalctl -u {name} -f");
     Ok(())
 }
 
@@ -231,12 +311,42 @@ mod tests {
             Path::new("/usr/local/bin/rust-afariano-runner"),
             Path::new("/Users/runner/.config/rust-afariano-runner/config.toml"),
             Path::new("/Users/runner"),
+            &Service { suffix: None },
         );
         assert!(p.contains("<string>/usr/local/bin/rust-afariano-runner</string>"));
         assert!(p.contains("/usr/local/bin:/opt/homebrew/bin"));
         assert!(p.contains("<key>KeepAlive</key>"));
+        assert!(p.contains(&format!("<string>{LABEL}</string>")));
         assert!(p.contains("/Users/runner/Library/Logs/rust-afariano-runner.log"));
         assert!(p.contains(&format!("<key>{CONFIG_ENV}</key>")));
+    }
+
+    #[test]
+    fn default_config_keeps_plain_names() {
+        let d = Path::new("/Users/r/.config/rust-afariano-runner/config.toml");
+        let s = Service::for_config(d, d, "mac-studio").unwrap();
+        assert_eq!(s.label(), LABEL);
+        assert_eq!(s.unit_name(), "rust-afariano-runner");
+        assert_eq!(s.unit_path(), PathBuf::from("/etc/systemd/system/rust-afariano-runner.service"));
+        assert_eq!(s.log_path(Path::new("/Users/r")), PathBuf::from("/Users/r/Library/Logs/rust-afariano-runner.log"));
+    }
+
+    #[test]
+    fn other_config_is_named_after_the_runner() {
+        let d = Path::new("/Users/r/.config/rust-afariano-runner/config.toml");
+        let c = Path::new("/Users/r/.config/rust-afariano-runner/shell.toml");
+        let s = Service::for_config(c, d, "mac studio/shell").unwrap();
+        assert_eq!(s.label(), format!("{LABEL}.mac-studio-shell"));
+        assert_eq!(s.unit_name(), "rust-afariano-runner-mac-studio-shell");
+        assert_eq!(s.unit_path(), PathBuf::from("/etc/systemd/system/rust-afariano-runner-mac-studio-shell.service"));
+        assert_eq!(
+            s.log_path(Path::new("/Users/r")),
+            PathBuf::from("/Users/r/Library/Logs/rust-afariano-runner-mac-studio-shell.log")
+        );
+        let p = launchd_plist(Path::new("/bin/r"), c, Path::new("/Users/r"), &s);
+        assert!(p.contains(&format!("<string>{LABEL}.mac-studio-shell</string>")));
+        assert!(p.contains("rust-afariano-runner-mac-studio-shell.log"));
+        assert!(Service::for_config(c, d, "../").is_err());
     }
 
     #[test]

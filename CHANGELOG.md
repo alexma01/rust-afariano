@@ -14,6 +14,12 @@ All notable changes to this project are documented here. The format follows
   before the script runs (`update-ca-certificates`, or appended to
   `/etc/ssl/certs/ca-certificates.crt`), and `NODE_EXTRA_CA_CERTS` and `SSL_CERT_DIR`
   point at it unless the job sets them.
+- Runner: several runners on one host, e.g. a docker and a shell executor on the same
+  Mac. `install` and `uninstall` with a `--config` other than the default name the
+  LaunchAgent, systemd unit and log after the runner
+  (`io.github.frank10gm.rust-afariano-runner.<name>`,
+  `rust-afariano-runner-<name>.service`); the default config keeps the plain names.
+  `register --builds-dir` gives each runner its own checkouts.
 
 ## [0.4.1] - 2026-11-02
 
