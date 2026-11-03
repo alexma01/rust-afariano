@@ -89,7 +89,9 @@ Open the setup link from the log to create the first administrator, then:
    ```
 
    Add `--privileged` for docker-in-docker services, or use `--executor shell` to run
-   jobs directly on the host.
+   jobs directly on the host. Behind a TLS-inspecting proxy, set
+   `extra_ca_file = "/abs/path/ca.crt"` under `[docker]` in the runner's
+   `config.toml`: jobs and services then trust that CA (system store, Node, Go).
 3. **Push a `.gitlab-ci.yml`.** Pipelines start on push, from *Run pipeline* in the UI
    (with variables), or through the [API](#api).
 

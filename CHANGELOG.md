@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Runner: `extra_ca_file` under `[docker]` in `config.toml` makes job and service
+  containers trust one more root CA, for runners behind a TLS-inspecting proxy. The
+  file is mounted in `/usr/local/share/ca-certificates`, added to the system store
+  before the script runs (`update-ca-certificates`, or appended to
+  `/etc/ssl/certs/ca-certificates.crt`), and `NODE_EXTRA_CA_CERTS` and `SSL_CERT_DIR`
+  point at it unless the job sets them.
+
 ## [0.4.1] - 2026-11-02
 
 ### Fixed

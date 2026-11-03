@@ -19,6 +19,24 @@ use crate::script;
 const AFTER_SCRIPT_TIMEOUT: Duration = Duration::from_secs(300);
 const SERVICE_WAIT_SECS: u32 = 30;
 
+/// Where `docker.extra_ca_file` is mounted in job and service containers: the
+/// directory `update-ca-certificates` reads on Debian, Ubuntu and Alpine.
+const EXTRA_CA_DIR: &str = "/usr/local/share/ca-certificates";
+const EXTRA_CA_PATH: &str = "/usr/local/share/ca-certificates/rust-afariano-extra-ca.crt";
+
+/// First line of every docker job script when `docker.extra_ca_file` is set: adds
+/// the CA to the system store (curl, git, apk, apt, OpenSSL), quietly doing nothing
+/// where the image cannot (no store, not root).
+const EXTRA_CA_PRELUDE: &str = "update-ca-certificates >/dev/null 2>&1 || \
+cat /usr/local/share/ca-certificates/rust-afariano-extra-ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+";
+
+/// Job script for `commands`, with the extra-CA prelude when the job needs it.
+fn job_script(commands: &[String], project_dir: &str, extra_ca: bool) -> String {
+    let body = script::generate(commands, project_dir);
+    if extra_ca { format!("{EXTRA_CA_PRELUDE}{body}") } else { body }
+}
+
 /// What the runner knows about itself.
 #[derive(Debug, Clone)]
 pub struct RunnerMeta {
@@ -243,11 +261,21 @@ async fn run_steps(
         Executor::Docker => set_var(&mut vars, "CI_DISPOSABLE_ENVIRONMENT", "true"),
         Executor::Shell => set_var(&mut vars, "CI_SHARED_ENVIRONMENT", "true"),
     }
+    let extra_ca = exec == Executor::Docker && ctx.cfg.docker.extra_ca_file.is_some();
+    if extra_ca {
+        // Node reads only its bundled roots plus this file; Go programs (dockerd in
+        // docker:dind) add SSL_CERT_DIR to the system roots. A job's own value wins.
+        for (k, v) in [("NODE_EXTRA_CA_CERTS", EXTRA_CA_PATH), ("SSL_CERT_DIR", EXTRA_CA_DIR)] {
+            if !vars.iter().any(|(key, _)| key == k) {
+                set_var(&mut vars, k, v);
+            }
+        }
+    }
 
     let main: Vec<String> = spec.before_script.iter().chain(spec.script.iter()).cloned().collect();
-    write_file(&tmp.join("script.sh"), script::generate(&main, &paths.project).as_bytes(), 0o644)?;
+    write_file(&tmp.join("script.sh"), job_script(&main, &paths.project, extra_ca).as_bytes(), 0o644)?;
     if !spec.after_script.is_empty() {
-        write_file(&tmp.join("after.sh"), script::generate(&spec.after_script, &paths.project).as_bytes(), 0o644)?;
+        write_file(&tmp.join("after.sh"), job_script(&spec.after_script, &paths.project, extra_ca).as_bytes(), 0o644)?;
     }
 
     // Docker: start pulling and services before the checkout? GitLab pulls
@@ -371,6 +399,9 @@ impl<'a> DockerJob<'a> {
                 mounts.push(format!("{name}:{v}"));
                 volumes.push(name);
             }
+        }
+        if let Some(ca) = &ctx.cfg.docker.extra_ca_file {
+            mounts.push(format!("{}:{EXTRA_CA_PATH}:ro", ca.display()));
         }
         mounts.push(format!("{}:{}", paths.project_host.display(), paths.project));
         Self {
@@ -628,5 +659,20 @@ mod tests {
         assert_eq!(human_duration(1800), "30m");
         assert_eq!(human_duration(5400), "1h 30m");
         assert_eq!(human_duration(0), "0s");
+    }
+
+    #[test]
+    fn extra_ca_prelude_never_fails_the_job() {
+        let cmds = vec!["echo ran".to_string()];
+        let plain = job_script(&cmds, "/", false);
+        assert!(!plain.contains("update-ca-certificates"));
+        let with_ca = job_script(&cmds, "/", true);
+        assert!(with_ca.starts_with("update-ca-certificates"));
+        assert!(with_ca.contains(EXTRA_CA_PATH));
+        // Here neither update-ca-certificates nor a writable system bundle exist
+        // (macOS, or Linux without root): the job still runs.
+        let out = std::process::Command::new("sh").arg("-c").arg(&with_ca).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("ran"));
     }
 }

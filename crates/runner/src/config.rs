@@ -75,6 +75,10 @@ pub struct DockerConfig {
     /// Small image with `nc`, used to wait for service ports.
     #[serde(default = "default_helper_image")]
     pub helper_image: String,
+    /// Extra root CA (PEM, absolute path on the runner host) trusted inside every
+    /// job and service container, e.g. the CA of a TLS-inspecting proxy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_ca_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -114,6 +118,7 @@ impl Default for DockerConfig {
             volumes: default_volumes(),
             pull_policy: PullPolicy::default(),
             helper_image: default_helper_image(),
+            extra_ca_file: None,
         }
     }
 }
@@ -151,6 +156,11 @@ impl Config {
         cfg.url = cfg.url.trim_end_matches('/').to_string();
         if cfg.concurrent == 0 {
             bail!("{}: concurrent must be at least 1", path.display());
+        }
+        if let Some(ca) = &cfg.docker.extra_ca_file
+            && (!ca.is_absolute() || !ca.is_file())
+        {
+            bail!("{}: docker.extra_ca_file {} is not an absolute path to a file", path.display(), ca.display());
         }
         Ok(cfg)
     }
@@ -267,5 +277,23 @@ token = "rfr_x"
         .unwrap();
         assert_eq!(cfg.docker.pull_policy, PullPolicy::IfNotPresent);
         assert!(cfg.docker.privileged);
+        assert!(cfg.docker.extra_ca_file.is_none());
+    }
+
+    #[test]
+    fn extra_ca_file_must_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let ca = dir.path().join("ca.crt");
+        let path = dir.path().join("config.toml");
+        let write = |ca: &str| {
+            std::fs::write(&path, format!("url = \"u\"\ntoken = \"t\"\n[docker]\nextra_ca_file = \"{ca}\"\n")).unwrap()
+        };
+
+        write(ca.to_str().unwrap());
+        assert!(Config::load(&path).is_err(), "missing file");
+        std::fs::write(&ca, "-----BEGIN CERTIFICATE-----\n").unwrap();
+        assert_eq!(Config::load(&path).unwrap().docker.extra_ca_file.as_deref(), Some(ca.as_path()));
+        write("ca.crt");
+        assert!(Config::load(&path).is_err(), "relative path");
     }
 }
