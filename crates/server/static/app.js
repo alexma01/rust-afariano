@@ -76,15 +76,27 @@
     cell.querySelector("[data-secret-hidden]").hidden = false;
   });
 
-  // Run pipeline: picking another branch or tag reloads the form with the
-  // variables of that ref's .gitlab-ci.yml.
+  // Run pipeline: entering another existing branch or tag reloads the form with
+  // the variables of that ref's .gitlab-ci.yml. A name that is not in the
+  // suggestions is left alone (the server says so on submit).
+  // Typing a name and clicking Run (or pressing Enter) submits instead: the
+  // server then shows that ref's variables first.
+  var reloadTimer = null;
   document.addEventListener("change", function (e) {
-    var sel = e.target.closest("select[data-reload-with]");
-    if (!sel) return;
+    var el = e.target.closest("[data-reload-with]");
+    if (!el) return;
+    var value = el.value.trim();
+    if (!value || value === el.getAttribute("data-current")) return;
+    if (el.list && !Array.prototype.some.call(el.list.options, function (o) { return o.value === value; })) return;
     var url = new URL(window.location.href);
-    url.searchParams.set(sel.getAttribute("data-reload-with"), sel.value);
-    window.location.assign(url.toString());
+    url.searchParams.set(el.getAttribute("data-reload-with"), value);
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(function () { window.location.assign(url.toString()); }, 300);
   });
+  document.addEventListener("submit", function () {
+    clearTimeout(reloadTimer);
+    reloadTimer = null;
+  }, true);
 
   // Confirm destructive forms.
   document.addEventListener("submit", function (e) {

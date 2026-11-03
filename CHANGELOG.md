@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-11-03
+
+### Changed
+
+- *Run pipeline* takes the branch or tag as text, with the repository's branches and
+  tags as suggestions, instead of a list. A name is a branch if one exists, else a tag,
+  as in the API. Entering another existing name reloads its variables; when Run is
+  clicked before that, the form shows the new ref's variables first instead of running
+  with the previous ref's defaults.
+
 ## [0.5.0] - 2026-11-03
 
 ### Added
@@ -142,6 +152,7 @@ First public release.
   clones of a 216 MB repository at once.
 - Container image, `docker-compose.yml`, and prebuilt runner binaries.
 
+[0.5.1]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.5.1
 [0.5.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.5.0
 [0.4.1]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.4.1
 [0.4.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.4.0

@@ -8,14 +8,17 @@
   <div><h1>Run pipeline</h1><p class="lead">Runs <code>.gitlab-ci.yml</code> from the branch or tag you pick, with <code>CI_PIPELINE_SOURCE=web</code>.</p></div>
 </div>
 {% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
+{% if !notice.is_empty() %}<div class="alert info">{% call ui::icon("warning") %}{% endcall %}<div>{{ notice }}</div></div>{% endif %}
 <form class="stack" method="post" action="/{{ nav.path }}/-/pipelines/new">
   <label class="field"><span>Run for branch or tag</span>
-    <select name="ref" data-reload-with="ref">
-      {% for b in branches %}{% let v = format!("branch:{}", b) %}<option value="{{ v }}"{% if v.as_str() == selected.as_str() || b.as_str() == selected.as_str() %} selected{% endif %}>{{ b }}</option>{% endfor %}
-      {% for t in tags %}{% let v = format!("tag:{}", t) %}<option value="{{ v }}"{% if v.as_str() == selected.as_str() %} selected{% endif %}>Tag {{ t }}</option>{% endfor %}
-    </select>
+    <input type="text" name="ref" value="{{ selected }}" list="pipeline-refs" required autocomplete="off" autocapitalize="off" spellcheck="false" data-reload-with="ref" data-current="{{ selected }}">
+    <datalist id="pipeline-refs">
+      {% for b in branches %}<option value="{{ b }}"></option>{% endfor %}
+      {% for t in tags %}<option value="{{ t }}" label="Tag {{ t }}"></option>{% endfor %}
+    </datalist>
   </label>
   {% if !form_vars_error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>Could not read the variables of <code>.gitlab-ci.yml</code>: {{ form_vars_error }}</div></div>{% endif %}
+  {% if !form_vars.is_empty() %}<input type="hidden" name="vars_from" value="{{ selected }}">{% endif %}
   {% for f in form_vars %}
   <label class="field"><span><code>{{ f.key }}</code></span>
     <span class="hint">{{ f.description }}</span>

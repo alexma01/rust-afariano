@@ -91,6 +91,7 @@ struct NewPipelinePage {
     tags: Vec<String>,
     selected: String,
     error: String,
+    notice: String,
     /// Variables of the selected ref's `.gitlab-ci.yml` that have a `description`.
     form_vars: Vec<FormVariable>,
     /// Why `form_vars` could not be read, if it could not.
@@ -113,23 +114,45 @@ pub async fn new_pipeline_form(
 ) -> AppResult<Response> {
     let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Write).await?;
     let selected = q.target.filter(|t| !t.is_empty()).unwrap_or_else(|| repo.default_branch.clone());
-    new_pipeline_page(&state, user, &repo, role, selected, String::new(), Vec::new()).await
+    new_pipeline_page(&state, user, &repo, role, selected, String::new(), String::new(), Vec::new()).await
 }
 
-/// `branch:<name>`, `tag:<name>` or a bare branch name → full ref name.
-fn full_ref(selected: &str) -> String {
-    match selected.split_once(':') {
-        Some(("tag", t)) => format!("refs/tags/{t}"),
-        Some(("branch", b)) => format!("refs/heads/{b}"),
-        _ => format!("refs/heads/{selected}"),
+/// The name typed or picked in the form, without the `branch:` / `tag:` prefix
+/// older forms (and bookmarked links) send. Git ref names cannot contain `:`.
+fn ref_input_name(target: &str) -> &str {
+    let t = target.trim();
+    match t.split_once(':') {
+        Some(("branch" | "tag", name)) => name,
+        _ => t,
     }
+}
+
+/// A branch or tag of the repository: `(ref name, is_tag, sha)`. A bare name is a
+/// branch if one exists, else a tag (as in the API); `branch:` / `tag:` pick one.
+async fn resolve_target(git: &crate::git::Git, target: &str) -> anyhow::Result<Option<(String, bool, String)>> {
+    let name = ref_input_name(target);
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let candidates: &[bool] = match target.trim().split_once(':') {
+        Some(("branch", _)) => &[false],
+        Some(("tag", _)) => &[true],
+        _ => &[false, true],
+    };
+    for &is_tag in candidates {
+        let full = format!("refs/{}/{name}", if is_tag { "tags" } else { "heads" });
+        if let Some(sha) = git.resolve(&full).await? {
+            return Ok(Some((name.to_string(), is_tag, sha)));
+        }
+    }
+    Ok(None)
 }
 
 /// The form variables of `.gitlab-ci.yml` at `selected`, or why they could not be read.
 async fn load_form_vars(state: &Shared, repo: &Repo, selected: &str) -> (Vec<FormVariable>, String) {
     let git = state.git(repo.id);
-    let sha = match git.resolve(&full_ref(selected)).await {
-        Ok(Some(sha)) => sha,
+    let sha = match resolve_target(&git, selected).await {
+        Ok(Some((_, _, sha))) => sha,
         Ok(None) => return (Vec::new(), String::new()),
         Err(e) => return (Vec::new(), format!("{e:#}")),
     };
@@ -155,6 +178,7 @@ fn merge_form_vars(form_vars: &mut [FormVariable], vars: Vec<PipelineVar>) -> Ve
     extra
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn new_pipeline_page(
     state: &Shared,
     user: User,
@@ -162,6 +186,7 @@ async fn new_pipeline_page(
     role: Role,
     selected: String,
     error: String,
+    notice: String,
     vars: Vec<PipelineVar>,
 ) -> AppResult<Response> {
     let refs = state.git(repo.id).refs().await?;
@@ -177,15 +202,17 @@ async fn new_pipeline_page(
         nav: RepoNav::new(repo, role, "pipelines"),
         branches: refs.iter().filter(|r| !r.is_tag()).map(|r| r.short().to_string()).collect(),
         tags: refs.iter().filter(|r| r.is_tag()).map(|r| r.short().to_string()).collect(),
-        selected,
+        selected: ref_input_name(&selected).to_string(),
         error,
+        notice,
         form_vars,
         form_vars_error,
         vars,
     })
 }
 
-/// `ref` is `branch:<name>` or `tag:<name>`; variables come as parallel arrays.
+/// `ref` is a branch or tag name (`branch:` / `tag:` prefixes still work); variables
+/// come as parallel arrays.
 pub async fn run_pipeline(
     State(state): State<Shared>,
     CurrentUser(user): CurrentUser,
@@ -194,33 +221,45 @@ pub async fn run_pipeline(
 ) -> AppResult<Response> {
     let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Write).await?;
     let mut target = String::new();
+    // The ref the prefilled variables were read from, when the form showed any.
+    let mut vars_from = None;
     let mut keys = Vec::new();
     let mut values = Vec::new();
     for (k, v) in form {
         match k.as_str() {
             "ref" => target = v,
+            "vars_from" => vars_from = Some(v),
             "var_key" => keys.push(v),
             "var_value" => values.push(v),
             _ => {}
         }
     }
     let vars: Vec<PipelineVar> = keys.into_iter().zip(values).map(|(key, value)| PipelineVar { key, value }).collect();
-    let (is_tag, ref_name) = match target.split_once(':') {
-        Some(("tag", t)) => (true, t.to_string()),
-        Some(("branch", b)) => (false, b.to_string()),
-        _ => return Err(bad("choose a branch or tag")),
-    };
+    if ref_input_name(&target).is_empty() {
+        let msg = "Enter a branch or tag.".to_string();
+        return new_pipeline_page(&state, user, &repo, role, target, msg, String::new(), vars).await;
+    }
     let vars_clean = match clean_vars(vars.clone()) {
         Ok(v) => v,
-        Err(AppError::BadRequest(msg)) => return new_pipeline_page(&state, user, &repo, role, target, msg, vars).await,
+        Err(AppError::BadRequest(msg)) => {
+            return new_pipeline_page(&state, user, &repo, role, target, msg, String::new(), vars).await;
+        }
         Err(e) => return Err(e),
     };
-    let full = format!("refs/{}/{ref_name}", if is_tag { "tags" } else { "heads" });
     let git = state.git(repo.id);
-    let Some(sha) = git.resolve(&full).await? else {
-        return new_pipeline_page(&state, user, &repo, role, target, format!("`{ref_name}` does not exist."), vars)
-            .await;
+    let Some((ref_name, is_tag, sha)) = resolve_target(&git, &target).await? else {
+        let msg = format!("No branch or tag `{}` in this repository.", ref_input_name(&target));
+        return new_pipeline_page(&state, user, &repo, role, target, msg, String::new(), vars).await;
     };
+    // The prefilled values came from another ref's .gitlab-ci.yml (the ref was changed
+    // and Run clicked before the form reloaded): show this ref's variables instead of
+    // running with the other ref's defaults. Values typed in the free rows stay.
+    if let Some(from) = vars_from.as_deref().map(ref_input_name).filter(|f| *f != ref_name) {
+        let (old, _) = load_form_vars(&state, &repo, from).await;
+        let extra: Vec<PipelineVar> = vars.into_iter().filter(|v| !old.iter().any(|f| f.key == v.key)).collect();
+        let notice = format!("The variables below now come from `{ref_name}`. Check them, then run the pipeline.");
+        return new_pipeline_page(&state, user, &repo, role, target, String::new(), notice, extra).await;
+    }
     let np = NewPipeline {
         repo: &repo,
         ref_name: ref_name.clone(),
@@ -238,7 +277,7 @@ pub async fn run_pipeline(
         Created::Filtered(reason) => format!("No pipeline was created: {reason}."),
         Created::NoConfig => format!("There is no {CI_FILE} on `{ref_name}`."),
     };
-    new_pipeline_page(&state, user, &repo, role, target, msg, vars).await
+    new_pipeline_page(&state, user, &repo, role, target, msg, String::new(), vars).await
 }
 
 struct StageCol {
@@ -572,6 +611,15 @@ mod tests {
         c.push(last);
         assert_eq!(utf8_chunk(&mut c).as_deref(), Some("é"));
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn ref_input_accepts_plain_and_prefixed_names() {
+        assert_eq!(ref_input_name("main"), "main");
+        assert_eq!(ref_input_name("  release/2.1 "), "release/2.1");
+        assert_eq!(ref_input_name("branch:develop"), "develop");
+        assert_eq!(ref_input_name("tag:v1.0"), "v1.0");
+        assert_eq!(ref_input_name(""), "");
     }
 
     #[test]
