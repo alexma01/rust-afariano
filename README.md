@@ -117,6 +117,7 @@ silently doing something else.
 | `default`, `image` (with `entrypoint`), `services` (alias, command, variables) | `pages`, `release`, `secrets` |
 | `before_script`, `script`, `after_script` | `when: delayed` |
 | `variables` (global, job, project, per run) with `$VAR` expansion | Scheduled pipelines |
+| `variables` with `description` / `options`: prefilled on *Run pipeline* | |
 | `when: on_success / on_failure / always / manual / never` | |
 | `allow_failure`, `timeout`, `tags` | `retry` and `interruptible` are accepted but have no effect yet |
 | `environment` (name, url), `resource_group` | |

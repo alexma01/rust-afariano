@@ -76,6 +76,16 @@
     cell.querySelector("[data-secret-hidden]").hidden = false;
   });
 
+  // Run pipeline: picking another branch or tag reloads the form with the
+  // variables of that ref's .gitlab-ci.yml.
+  document.addEventListener("change", function (e) {
+    var sel = e.target.closest("select[data-reload-with]");
+    if (!sel) return;
+    var url = new URL(window.location.href);
+    url.searchParams.set(sel.getAttribute("data-reload-with"), sel.value);
+    window.location.assign(url.toString());
+  });
+
   // Confirm destructive forms.
   document.addEventListener("submit", function (e) {
     var msg = e.target.getAttribute("data-confirm");

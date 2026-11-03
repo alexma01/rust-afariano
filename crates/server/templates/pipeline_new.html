@@ -10,14 +10,28 @@
 {% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
 <form class="stack" method="post" action="/{{ nav.path }}/-/pipelines/new">
   <label class="field"><span>Run for branch or tag</span>
-    <select name="ref">
+    <select name="ref" data-reload-with="ref">
       {% for b in branches %}{% let v = format!("branch:{}", b) %}<option value="{{ v }}"{% if v.as_str() == selected.as_str() || b.as_str() == selected.as_str() %} selected{% endif %}>{{ b }}</option>{% endfor %}
       {% for t in tags %}{% let v = format!("tag:{}", t) %}<option value="{{ v }}"{% if v.as_str() == selected.as_str() %} selected{% endif %}>Tag {{ t }}</option>{% endfor %}
     </select>
   </label>
+  {% if !form_vars_error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>Could not read the variables of <code>.gitlab-ci.yml</code>: {{ form_vars_error }}</div></div>{% endif %}
+  {% for f in form_vars %}
+  <label class="field"><span><code>{{ f.key }}</code></span>
+    <span class="hint">{{ f.description }}</span>
+    <input type="hidden" name="var_key" value="{{ f.key }}">
+    {% if f.options.is_empty() %}
+    <input type="text" name="var_value" value="{{ f.value }}" autocomplete="off">
+    {% else %}
+    <select name="var_value">
+      {% for o in f.options %}<option value="{{ o }}"{% if o.as_str() == f.value.as_str() %} selected{% endif %}>{{ o }}</option>{% endfor %}
+    </select>
+    {% endif %}
+  </label>
+  {% endfor %}
   <div class="field">
-    <span>Variables</span>
-    <span class="hint">They override project and YAML variables for this run only.</span>
+    <span>{% if form_vars.is_empty() %}Variables{% else %}Other variables{% endif %}</span>
+    <span class="hint">{% if form_vars.is_empty() %}They override project and YAML variables for this run only.{% else %}All of these override project and YAML variables for this run only. The ones above come from <code>.gitlab-ci.yml</code> (variables with a <code>description</code>).{% endif %}</span>
     {% for v in vars %}
     <div class="row2">
       <input type="text" name="var_key" placeholder="Key" value="{{ v.key }}" autocomplete="off" aria-label="Variable key">

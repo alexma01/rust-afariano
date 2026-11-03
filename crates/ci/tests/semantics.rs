@@ -431,3 +431,54 @@ fn public_helpers() {
     assert_eq!(evaluate_if(r#"$A == "x""#, &vars), Ok(true));
     assert!(evaluate_if("$A ==", &vars).is_err());
 }
+
+#[test]
+fn form_variables_are_the_described_ones() {
+    let src = r#"
+variables:
+  PLAIN: x
+  NO_DESCRIPTION:
+    value: y
+  APP_BRANCH:
+    value: development
+    description: Branch to build.
+  APP_ENV:
+    value: dev
+    options: [dev, test, prod]
+    description: Environment.
+  EMPTY:
+    description: No default.
+job:
+  script: [echo]
+"#;
+    let vars = rust_afariano_ci::form_variables(src).unwrap();
+    let got: Vec<(&str, &str, &str, Vec<&str>)> = vars
+        .iter()
+        .map(|v| {
+            (v.key.as_str(), v.value.as_str(), v.description.as_str(), v.options.iter().map(String::as_str).collect())
+        })
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("APP_BRANCH", "development", "Branch to build.", vec![]),
+            ("APP_ENV", "dev", "Environment.", vec!["dev", "test", "prod"]),
+            ("EMPTY", "", "No default.", vec![]),
+        ]
+    );
+    // The plan still sees every variable with its value.
+    assert!(ok(src).variables.contains(&("APP_ENV".into(), "dev".into())));
+    assert!(rust_afariano_ci::form_variables("job:\n  script: [echo]\n").unwrap().is_empty());
+}
+
+#[test]
+fn variable_value_must_be_one_of_its_options() {
+    let e = err("variables:\n  ENV:\n    value: qa\n    options: [dev, prod]\njob:\n  script: [echo]\n");
+    assert!(e.contains("`ENV:value` must be one of its `options`, got `qa`"), "{e}");
+    let e = err("variables:\n  ENV:\n    value: dev\n    options: dev\njob:\n  script: [echo]\n");
+    assert!(e.contains("`ENV:options` must be a list"), "{e}");
+    assert!(
+        rust_afariano_ci::form_variables("variables:\n  ENV:\n    value: qa\n    options: [dev]\n    description: d\n")
+            .is_err()
+    );
+}

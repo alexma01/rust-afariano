@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.5.0] - 2026-11-03
 
 ### Added
 
@@ -20,6 +20,16 @@ All notable changes to this project are documented here. The format follows
   (`io.github.frank10gm.rust-afariano-runner.<name>`,
   `rust-afariano-runner-<name>.service`); the default config keeps the plain names.
   `register --builds-dir` gives each runner its own checkouts.
+- *Run pipeline* lists the top-level `variables` that have a `description`, as
+  GitLab does: name, description and `value` prefilled, and a select when the
+  variable has `options`. Picking another branch or tag reloads them from that
+  ref's `.gitlab-ci.yml`. Other variables can still be added below.
+
+### Changed
+
+- A variable with `options` must have its `value` among them, and `options` must be
+  a list of plain values (GitLab rejects such files too). Pipelines with one fail at
+  creation with a message naming the variable.
 
 ## [0.4.1] - 2026-11-02
 
@@ -132,6 +142,7 @@ First public release.
   clones of a 216 MB repository at once.
 - Container image, `docker-compose.yml`, and prebuilt runner binaries.
 
+[0.5.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.5.0
 [0.4.1]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.4.1
 [0.4.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.4.0
 [0.3.0]: https://github.com/frank10gm/rust-afariano/releases/tag/v0.3.0

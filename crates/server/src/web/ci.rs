@@ -8,6 +8,7 @@ use axum::http::header;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Redirect, Response};
 use futures_util::Stream;
+use rust_afariano_ci::FormVariable;
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::StreamExt as _;
@@ -90,16 +91,68 @@ struct NewPipelinePage {
     tags: Vec<String>,
     selected: String,
     error: String,
+    /// Variables of the selected ref's `.gitlab-ci.yml` that have a `description`.
+    form_vars: Vec<FormVariable>,
+    /// Why `form_vars` could not be read, if it could not.
+    form_vars_error: String,
     vars: Vec<PipelineVar>,
+}
+
+#[derive(Deserialize)]
+pub struct NewPipelineQuery {
+    /// `branch:<name>` or `tag:<name>`, as in the form.
+    #[serde(default, rename = "ref")]
+    target: Option<String>,
 }
 
 pub async fn new_pipeline_form(
     State(state): State<Shared>,
     CurrentUser(user): CurrentUser,
     Path((ns, name)): Path<(String, String)>,
+    Query(q): Query<NewPipelineQuery>,
 ) -> AppResult<Response> {
     let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Write).await?;
-    new_pipeline_page(&state, user, &repo, role, repo.default_branch.clone(), String::new(), Vec::new()).await
+    let selected = q.target.filter(|t| !t.is_empty()).unwrap_or_else(|| repo.default_branch.clone());
+    new_pipeline_page(&state, user, &repo, role, selected, String::new(), Vec::new()).await
+}
+
+/// `branch:<name>`, `tag:<name>` or a bare branch name → full ref name.
+fn full_ref(selected: &str) -> String {
+    match selected.split_once(':') {
+        Some(("tag", t)) => format!("refs/tags/{t}"),
+        Some(("branch", b)) => format!("refs/heads/{b}"),
+        _ => format!("refs/heads/{selected}"),
+    }
+}
+
+/// The form variables of `.gitlab-ci.yml` at `selected`, or why they could not be read.
+async fn load_form_vars(state: &Shared, repo: &Repo, selected: &str) -> (Vec<FormVariable>, String) {
+    let git = state.git(repo.id);
+    let sha = match git.resolve(&full_ref(selected)).await {
+        Ok(Some(sha)) => sha,
+        Ok(None) => return (Vec::new(), String::new()),
+        Err(e) => return (Vec::new(), format!("{e:#}")),
+    };
+    match git.blob(&sha, CI_FILE, 1 << 20).await {
+        Ok(Some((_, yaml))) => match rust_afariano_ci::form_variables(&String::from_utf8_lossy(&yaml)) {
+            Ok(v) => (v, String::new()),
+            Err(e) => (Vec::new(), e.to_string()),
+        },
+        Ok(None) => (Vec::new(), String::new()),
+        Err(e) => (Vec::new(), format!("{e:#}")),
+    }
+}
+
+/// Puts submitted values back into the form variables; the rest stay free rows.
+fn merge_form_vars(form_vars: &mut [FormVariable], vars: Vec<PipelineVar>) -> Vec<PipelineVar> {
+    let mut extra = Vec::new();
+    for v in vars {
+        match form_vars.iter_mut().find(|f| f.key == v.key) {
+            Some(f) => f.value = v.value,
+            None => extra.push(v),
+        }
+    }
+    extra
 }
 
 async fn new_pipeline_page(
@@ -109,10 +162,14 @@ async fn new_pipeline_page(
     role: Role,
     selected: String,
     error: String,
-    mut vars: Vec<PipelineVar>,
+    vars: Vec<PipelineVar>,
 ) -> AppResult<Response> {
     let refs = state.git(repo.id).refs().await?;
-    while vars.len() < 3 {
+    let (mut form_vars, form_vars_error) = load_form_vars(state, repo, &selected).await;
+    let mut vars = merge_form_vars(&mut form_vars, vars);
+    vars.retain(|v| !v.key.is_empty() || !v.value.is_empty());
+    let free_rows = if form_vars.is_empty() { 3 } else { vars.len() + 1 };
+    while vars.len() < free_rows {
         vars.push(PipelineVar { key: String::new(), value: String::new() });
     }
     render(NewPipelinePage {
@@ -122,6 +179,8 @@ async fn new_pipeline_page(
         tags: refs.iter().filter(|r| r.is_tag()).map(|r| r.short().to_string()).collect(),
         selected,
         error,
+        form_vars,
+        form_vars_error,
         vars,
     })
 }

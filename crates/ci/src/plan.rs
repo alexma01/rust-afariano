@@ -6,7 +6,7 @@ use rust_afariano_proto::{ImageSpec, ServiceSpec, Variable};
 
 use crate::extends::Resolver;
 use crate::yaml::{self, Map, Value};
-use crate::{Context, Environment, Error, Job, Outcome, Plan, When, duration, expr};
+use crate::{Context, Environment, Error, FormVariable, Job, Outcome, Plan, When, duration, expr};
 
 /// Top-level keys that are not jobs.
 const TOP_LEVEL_KEYWORDS: &[&str] = &[
@@ -927,6 +927,44 @@ fn parse_script(v: Option<&Value>, job: &str, key: &str) -> Result<Vec<String>, 
     Ok(out)
 }
 
+/// `options` of a variable: a list of plain values (empty when absent).
+fn parse_options(m: &Map, key: &str, what: &str) -> Result<Vec<String>, Error> {
+    match m.get("options") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Seq(items)) => items
+            .iter()
+            .map(|i| {
+                i.scalar_string().ok_or_else(|| {
+                    invalid(format!("{what}: `{key}:options` must be a list of strings, got {} in it", i.kind()))
+                })
+            })
+            .collect(),
+        Some(other) => Err(invalid(format!("{what}: `{key}:options` must be a list, got {}", other.kind()))),
+    }
+}
+
+pub fn form_variables(src: &str) -> Result<Vec<FormVariable>, Error> {
+    let what = "top-level `variables`";
+    let root = yaml::parse(src)?;
+    // `plan` reports a file that is not a mapping, or variables of the wrong type.
+    parse_variables(root.as_map().and_then(|r| r.get("variables")), what)?;
+    let Some(vars) = root.as_map().and_then(|r| r.get("variables")).and_then(Value::as_map) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for (key, value) in vars.iter() {
+        let Some(m) = value.as_map() else { continue };
+        let Some(description) = m.get("description").and_then(Value::scalar_string) else { continue };
+        out.push(FormVariable {
+            key: key.to_string(),
+            value: m.get("value").and_then(Value::scalar_string).unwrap_or_default(),
+            description,
+            options: parse_options(m, key, what)?,
+        });
+    }
+    Ok(out)
+}
+
 fn parse_variables(v: Option<&Value>, what: &str) -> Result<Vec<(String, String)>, Error> {
     let map = match v {
         None | Some(Value::Null) => return Ok(Vec::new()),
@@ -944,12 +982,19 @@ fn parse_variables(v: Option<&Value>, what: &str) -> Result<Vec<(String, String)
                             return Err(invalid(format!("{what}: `{key}` has an unknown key `{k}`")));
                         }
                     }
-                    match m.get("value") {
+                    let value = match m.get("value") {
                         None => String::new(),
                         Some(v) => v.scalar_string().ok_or_else(|| {
                             invalid(format!("{what}: `{key}:value` must be a string, got {}", v.kind()))
                         })?,
+                    };
+                    let options = parse_options(m, key, what)?;
+                    if !options.is_empty() && !options.contains(&value) {
+                        return Err(invalid(format!(
+                            "{what}: `{key}:value` must be one of its `options`, got `{value}`"
+                        )));
                     }
+                    value
                 }
                 Value::Seq(_) => {
                     return Err(invalid(format!("{what}: `{key}` must be a string, got a list")));

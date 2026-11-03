@@ -99,6 +99,21 @@ pub fn plan(yaml: &str, ctx: &Context) -> Result<Outcome, Error> {
     plan::plan(yaml, ctx)
 }
 
+/// A top-level variable the *Run pipeline* form shows prefilled: one with a
+/// `description`, as in GitLab. With `options`, the form offers only those values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormVariable {
+    pub key: String,
+    pub value: String,
+    pub description: String,
+    pub options: Vec<String>,
+}
+
+/// The top-level `variables` of `yaml` that have a `description`, in file order.
+pub fn form_variables(yaml: &str) -> Result<Vec<FormVariable>, Error> {
+    plan::form_variables(yaml)
+}
+
 /// GitLab duration (`30m`, `1h 30m`, `90 minutes`, `2 hours`, `3600`) → seconds.
 pub fn parse_duration(s: &str) -> Option<u64> {
     duration::parse(s)
