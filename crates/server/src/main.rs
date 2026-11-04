@@ -12,11 +12,13 @@ mod accounts;
 mod api;
 mod app;
 mod auth;
+mod commit_status;
 mod config;
 mod error;
 mod git;
 mod git_http;
 mod logs;
+mod mirror;
 mod models;
 mod ops;
 mod pipelines;
@@ -81,6 +83,9 @@ async fn run(cfg: Config) -> anyhow::Result<()> {
         });
     }
     tokio::spawn(pipelines::reaper(state.clone()));
+    mirror::clean_tmp(&state.cfg.data_dir);
+    tokio::spawn(mirror::poller(state.clone()));
+    tokio::spawn(commit_status::worker(state.clone()));
 
     let app = web::router(state.clone());
     let listener = tokio::net::TcpListener::bind(http_addr).await.with_context(|| format!("binding {http_addr}"))?;

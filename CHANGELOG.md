@@ -4,6 +4,57 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-11-04
+
+### Added
+
+- Pull mirrors, for projects whose code and `.gitlab-ci.yml` stay on GitHub,
+  Bitbucket or another git server. *New repository → Mirror of*, *Settings → Mirror*
+  or `PUT /api/v1/repos/{ns}/{name}/mirror` (URL: administrators). The repository
+  copies the upstream's branches (all, or patterns such as `main, release/*`) and
+  tags, follows its default branch, and refuses pushes over HTTPS and SSH with a
+  message naming the upstream.
+  - *Run pipeline* and `POST …/pipelines` fetch the upstream first, so a pipeline
+    runs on the commit the upstream has now; when the upstream cannot be read,
+    nothing starts and the reason is shown (`502` in the API). This replaces copy
+    scripts plus a "is this still the latest commit?" check in deploy scripts.
+  - Between runs: every 5 minutes (`RUST_AFARIANO_MIRROR_INTERVAL`, `0` turns it
+    off), on *Sync now*, and on the upstream's webhook
+    (`POST /api/v1/repos/{ns}/{name}/mirror/hook`, signed with the mirror's secret:
+    GitHub, Bitbucket and GitLab formats).
+  - SSH URLs use a key generated for the repository (add it upstream as a
+    read-only deploy key or access key); the host key is pinned at the first
+    sync. `https://` URLs take an optional token (`token` or `user:token`).
+    Failed syncs say why and what to do (key not added, host key changed, token
+    refused, repository not found), on the repository page and in Settings.
+  - Commit statuses: with a token, every pipeline shows on its commit upstream
+    (GitHub and GitHub Enterprise Cloud `*.ghe.com`: commit statuses; Bitbucket:
+    build statuses), as pending, passed, failed or canceled, linking to the
+    pipeline.
+- Prevent outdated deployment jobs, as in GitLab (*Settings → General*, API
+  `prevent_outdated_deploys`): a job with an `environment` does not run when a newer
+  pipeline already deployed there successfully; it fails as
+  `outdated deployment` with a note in its log. Retrying an old deployment job
+  still runs it, to roll back on purpose.
+- Each pipeline keeps its commit as a hidden `refs/pipelines/<id>`, so runners and
+  retries still fetch it after a force push or branch deletion.
+
+### Changed
+
+- *Prevent outdated deployment jobs* is on for every repository after the upgrade.
+  Turn it off in *Settings → General* to let an older pipeline's deployment replace
+  a newer one.
+- The container image includes the OpenSSH client (for SSH mirrors).
+- Repository JSON has `prevent_outdated_deploys` and `mirror_url`.
+
+### Upgrading
+
+Migration 4 adds `repos.mirror_url`, `repos.prevent_outdated_deploys`,
+`pipelines.reported_status` and the `mirrors` table. To roll back to 0.5.x, first:
+`DROP TABLE mirrors; ALTER TABLE repos DROP COLUMN mirror_url, DROP COLUMN
+prevent_outdated_deploys; ALTER TABLE pipelines DROP COLUMN reported_status;
+DELETE FROM _sqlx_migrations WHERE version = 4;`
+
 ## [0.5.1] - 2026-11-03
 
 ### Changed

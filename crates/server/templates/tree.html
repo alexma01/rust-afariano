@@ -12,6 +12,14 @@
     {% if !nav.description.is_empty() %}<p class="lead">{{ nav.description }}</p>{% endif %}
   </div>
 </div>
+{% if nav.is_mirror() %}
+<div class="alert {% if mirror_error.is_empty() %}info{% else %}err{% endif %} mirror-bar">
+  {% if mirror_error.is_empty() %}{% call ui::i("history") %}{% endcall %}{% else %}{% call ui::icon("failed") %}{% endcall %}{% endif %}
+  <div>Mirror of {% if nav.mirror_web.is_empty() %}<code>{{ nav.mirror }}</code>{% else %}<a href="{{ nav.mirror_web }}" rel="noopener">{{ nav.mirror }}</a>{% endif %}, last synced {{ mirror_synced }}. Push there: this copy follows it.
+    {% if !mirror_error.is_empty() %}<br><strong>The last sync failed:</strong> {{ mirror_error }}{% if nav.can_maintain() %} <a href="/{{ nav.path }}/-/settings#mirror">Mirror settings</a>{% endif %}{% endif %}</div>
+  {% if nav.can_write() %}<form method="post" action="/{{ nav.path }}/-/settings/mirror/sync"><button class="btn sm" type="submit">{% call ui::i("retry") %}{% endcall %}Sync now</button></form>{% endif %}
+</div>
+{% endif %}
 {% if !empty %}
 <div class="stats">
   <span>{% call ui::i("commit") %}{% endcall %}<strong>{{ commit_count }}</strong> commit{% if commit_count != 1 %}s{% endif %}</span>
@@ -21,7 +29,12 @@
 {% endif %}
 {% endif %}
 
-{% if empty %}
+{% if empty && nav.is_mirror() %}
+<div class="box"><div class="box-body">
+  <h2>Waiting for the first copy</h2>
+  <p class="muted">Nothing has arrived from {{ nav.mirror }} yet.{% if nav.can_maintain() %} Give the mirror's key read access on the upstream (<a href="/{{ nav.path }}/-/settings#mirror">Settings → Mirror</a>), then Sync now.{% endif %}</p>
+</div></div>
+{% else if empty %}
 <div class="box"><div class="box-body">
   <h2>Push your code</h2>
   <p class="muted">This repository is empty. From an existing project:</p>

@@ -217,9 +217,11 @@ pub async fn create(state: &AppState, np: NewPipeline<'_>) -> anyhow::Result<Cre
         }
     }
     tx.commit().await?;
+    git.keep_around(pipeline_id, &np.sha).await;
     if plan.is_some() {
         advance(state, pipeline_id).await?;
     }
+    crate::commit_status::notify(state, pipeline_id);
     tracing::info!(repo = %np.repo.path(), iid, r#ref = %np.ref_name, source = np.source, "pipeline created");
     Ok(Created::Pipeline(iid))
 }
@@ -299,7 +301,10 @@ fn pipeline_status(jobs: &[Job], status: &HashMap<i64, String>) -> &'static str 
 /// Move `created` jobs whose dependencies settled, then recompute the pipeline status.
 pub async fn advance(state: &AppState, pipeline_id: i64) -> anyhow::Result<()> {
     let mut tx = state.db.begin().await?;
-    sqlx::query("SELECT id FROM pipelines WHERE id = $1 FOR UPDATE").bind(pipeline_id).execute(&mut *tx).await?;
+    let was: String = sqlx::query_scalar("SELECT status FROM pipelines WHERE id = $1 FOR UPDATE")
+        .bind(pipeline_id)
+        .fetch_one(&mut *tx)
+        .await?;
     let jobs = load_jobs(&mut tx, pipeline_id).await?;
     let mut status: HashMap<i64, String> = jobs.iter().map(|j| (j.id, j.status.clone())).collect();
     let mut changed: Vec<(i64, &'static str)> = Vec::new();
@@ -346,6 +351,9 @@ pub async fn advance(state: &AppState, pipeline_id: i64) -> anyhow::Result<()> {
     if changed.iter().any(|(_, s)| *s == "pending") {
         state.jobs_ready.notify_waiters();
     }
+    if was != p {
+        crate::commit_status::notify(state, pipeline_id);
+    }
     Ok(())
 }
 
@@ -366,17 +374,46 @@ pub async fn assign(state: &AppState, runner: &Runner) -> anyhow::Result<Option<
     let token = new_token(proto::JOB_TOKEN_PREFIX);
     let mut tx = state.db.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(7378656970)").execute(&mut *tx).await?;
-    let job_id: Option<i64> = sqlx::query_scalar(
-        "SELECT j.id FROM jobs j WHERE j.status = 'pending' AND j.tags <@ $1::text[] \
-         AND (cardinality(j.tags) > 0 OR $2) \
-         AND (j.resource_group IS NULL OR NOT EXISTS (SELECT 1 FROM jobs r WHERE r.repo_id = j.repo_id \
-              AND r.resource_group = j.resource_group AND r.status = 'running')) \
-         ORDER BY j.id LIMIT 1",
-    )
-    .bind(&runner.tags)
-    .bind(runner.run_untagged)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let mut outdated: Vec<(i64, i64, String)> = Vec::new();
+    let job_id = loop {
+        let job_id: Option<i64> = sqlx::query_scalar(
+            "SELECT j.id FROM jobs j WHERE j.status = 'pending' AND j.tags <@ $1::text[] \
+             AND (cardinality(j.tags) > 0 OR $2) \
+             AND (j.resource_group IS NULL OR NOT EXISTS (SELECT 1 FROM jobs r WHERE r.repo_id = j.repo_id \
+                  AND r.resource_group = j.resource_group AND r.status = 'running')) \
+             ORDER BY j.id LIMIT 1",
+        )
+        .bind(&runner.tags)
+        .bind(runner.run_untagged)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(job_id) = job_id else { break None };
+        match newer_deployment(&mut tx, job_id).await? {
+            None => break Some(job_id),
+            Some(note) => {
+                let pipeline_id: i64 = sqlx::query_scalar(
+                    "UPDATE jobs SET status = 'failed', failure_reason = 'outdated_deployment', finished_at = now(), \
+                     updated_at = now() WHERE id = $1 RETURNING pipeline_id",
+                )
+                .bind(job_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                outdated.push((job_id, pipeline_id, note));
+            }
+        }
+    };
+    if !outdated.is_empty() {
+        // Committed before telling anyone, so the failures are what they read.
+        tx.commit().await?;
+        for (id, pipeline_id, note) in outdated {
+            state.logs.note(id, &note).await;
+            state.logs.end(id);
+            tracing::info!(job = id, "outdated deployment job not run");
+            advance(state, pipeline_id).await?;
+        }
+        // Start over: the job picked last is still free to take.
+        return Box::pin(assign(state, runner)).await;
+    }
     let Some(job_id) = job_id else {
         tx.commit().await?;
         return Ok(None);
@@ -405,6 +442,34 @@ pub async fn assign(state: &AppState, runner: &Runner) -> anyhow::Result<Option<
             Ok(None)
         }
     }
+}
+
+/// GitLab's "Prevent outdated deployment jobs": a job deploying to an environment
+/// does not start when a newer pipeline already deployed there successfully. A
+/// retried job still runs: retrying an old deployment is how one rolls back.
+/// Environments named with variables (review apps) are not compared.
+/// Returns the note for the job's log when it must not run.
+async fn newer_deployment(tx: &mut Transaction<'_, Postgres>, job_id: i64) -> sqlx::Result<Option<String>> {
+    let newer: Option<(String, i32, String)> = sqlx::query_as(
+        "SELECT j.environment, p.iid, p.sha FROM jobs j JOIN repos r ON r.id = j.repo_id \
+         JOIN jobs d ON d.repo_id = j.repo_id AND d.environment = j.environment AND d.status = 'success' \
+              AND d.pipeline_id > j.pipeline_id \
+         JOIN pipelines p ON p.id = d.pipeline_id \
+         WHERE j.id = $1 AND r.prevent_outdated_deploys AND j.retry_of IS NULL \
+           AND j.environment IS NOT NULL AND strpos(j.environment, '$') = 0 \
+         ORDER BY d.pipeline_id DESC LIMIT 1",
+    )
+    .bind(job_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(newer.map(|(env, iid, sha)| {
+        format!(
+            "Not run: pipeline #{iid} ({}) already deployed a newer version to {env}, and this job would replace it \
+             with an older one (Settings → Prevent outdated deployment jobs). To deploy the latest version, run a \
+             new pipeline. To go back to this version on purpose, retry this job.",
+            short_sha(&sha)
+        )
+    }))
 }
 
 /// `$VAR` / `${VAR}` expansion with GitLab's rules: unknown → empty, `$$` → `$`.

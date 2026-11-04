@@ -113,6 +113,10 @@ pub async fn new_pipeline_form(
     Query(q): Query<NewPipelineQuery>,
 ) -> AppResult<Response> {
     let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Write).await?;
+    if repo.is_mirror() {
+        // Fresh branches and variables for the next look; Run fetches again anyway.
+        crate::mirror::request_sync(&state, repo.id);
+    }
     let selected = q.target.filter(|t| !t.is_empty()).unwrap_or_else(|| repo.default_branch.clone());
     new_pipeline_page(&state, user, &repo, role, selected, String::new(), String::new(), Vec::new()).await
 }
@@ -246,6 +250,16 @@ pub async fn run_pipeline(
         }
         Err(e) => return Err(e),
     };
+    // A mirror runs what its upstream has now, never what the last sync brought.
+    if repo.is_mirror()
+        && let Err(e) = crate::mirror::sync_for_pipeline(&state, &repo).await
+    {
+        let msg = format!(
+            "No pipeline was started: pipe could not fetch {}. {e}",
+            super::mirror_display(repo.mirror_url.as_deref().unwrap_or_default())
+        );
+        return new_pipeline_page(&state, user, &repo, role, target, msg, String::new(), vars).await;
+    }
     let git = state.git(repo.id);
     let Some((ref_name, is_tag, sha)) = resolve_target(&git, &target).await? else {
         let msg = format!("No branch or tag `{}` in this repository.", ref_input_name(&target));
@@ -640,6 +654,8 @@ mod tests {
             pipelines_on_push: true,
             created_at: chrono::Utc::now(),
             pushed_at: None,
+            mirror_url: None,
+            prevent_outdated_deploys: true,
         };
         let page = |role| {
             PipelinesPage {

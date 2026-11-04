@@ -28,7 +28,7 @@
       <a class="repo-row" href="/{{ r.path }}">
         <span class="avatar" style="--h: {{ r.hue }}">{{ r.initial }}</span>
         <span class="two-line" style="min-width:0">
-          <span class="path"><span class="ns">{{ r.ns }} /</span> {{ r.name }}</span>
+          <span class="path"><span class="ns">{{ r.ns }} /</span> {{ r.name }}{% if !r.mirror.is_empty() %} <span class="pill" title="Mirror of {{ r.mirror }}">Mirror</span>{% endif %}</span>
           {% if !r.description.is_empty() %}<span class="cell-sub truncate">{{ r.description }}</span>{% endif %}
         </span>
       </a>

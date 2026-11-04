@@ -18,6 +18,8 @@
   </div>
   <label class="field"><span>Description <span class="hint">(optional)</span></span><input type="text" name="description" value="{{ description }}"></label>
   <label class="field"><span>Default branch</span><input type="text" name="default_branch" value="{{ default_branch }}"></label>
+  <label class="field"><span>Mirror of <span class="hint">(optional)</span></span><input type="text" name="mirror_url" value="{{ mirror_url }}" placeholder="git@bitbucket.org:team/project.git" autocomplete="off" spellcheck="false">
+    <span class="hint">For code that stays on GitHub, Bitbucket or another server, <code>.gitlab-ci.yml</code> included: pipe copies it and runs its pipelines, and refuses pushes. The next page shows the read-only key to add there.</span></label>
   <div class="actions"><button class="btn confirm" type="submit">Create repository</button><a class="btn" href="/">Cancel</a></div>
 </form>
 {% endblock %}

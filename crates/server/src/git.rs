@@ -27,6 +27,10 @@ pub const LOW_MEMORY_CONFIG: &[&str] = &[
     "core.bigFileThreshold=8m",
     "uploadpack.allowFilter=true",
     "uploadpack.allowReachableSHA1InWant=true",
+    // `refs/pipelines/<id>` keep each pipeline's commit after a force push (as in
+    // GitLab): clients never see or push them, runners still fetch the commit by id.
+    "transfer.hideRefs=refs/pipelines",
+    "uploadpack.allowTipSHA1InWant=true",
 ];
 
 pub fn repo_dir(data_dir: &Path, repo_id: i64) -> PathBuf {
@@ -145,6 +149,29 @@ impl Git {
             self.run_ok(&["config", k, v], 1024).await?;
         }
         Ok(())
+    }
+
+    pub async fn update_ref(&self, name: &str, sha: &str) -> anyhow::Result<()> {
+        self.run_ok(&["update-ref", name, sha], 1024).await?;
+        Ok(())
+    }
+
+    pub async fn delete_ref(&self, name: &str) -> anyhow::Result<()> {
+        self.run_ok(&["update-ref", "-d", name], 1024).await?;
+        Ok(())
+    }
+
+    /// Keeps a pipeline's commit reachable (and so fetchable by its runners and
+    /// retries) even after the branch is rewritten.
+    pub async fn keep_around(&self, pipeline_id: i64, sha: &str) {
+        if let Err(e) = self.update_ref(&format!("refs/pipelines/{pipeline_id}"), sha).await {
+            tracing::warn!(pipeline_id, "keeping the pipeline's commit: {e:#}");
+        }
+    }
+
+    /// A git command on this repository, for callers that set their own environment.
+    pub fn command(&self) -> Command {
+        self.cmd()
     }
 
     pub async fn set_head(&self, branch: &str) -> anyhow::Result<()> {

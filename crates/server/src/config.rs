@@ -77,6 +77,11 @@ pub struct Config {
     #[arg(long, env = "RUST_AFARIANO_DB_POOL", default_value_t = 5)]
     pub db_pool: u32,
 
+    /// Seconds between two checks of a pull mirror's upstream; 0 turns polling off
+    /// (webhooks and Run pipeline still fetch).
+    #[arg(long, env = "RUST_AFARIANO_MIRROR_INTERVAL", default_value_t = 300)]
+    pub mirror_interval: u64,
+
     /// Session lifetime in hours.
     #[arg(long, env = "RUST_AFARIANO_SESSION_TTL_HOURS", default_value_t = 24 * 30)]
     pub session_ttl_hours: i64,
@@ -116,6 +121,7 @@ impl Config {
         }
         std::fs::create_dir_all(self.data_dir.join("repos"))
             .and_then(|_| std::fs::create_dir_all(self.data_dir.join("logs")))
+            .and_then(|_| std::fs::create_dir_all(self.data_dir.join("tmp")))
             .with_context(|| format!("creating {}", self.data_dir.display()))?;
         self.data_dir = self.data_dir.canonicalize()?;
         Ok(self)

@@ -29,6 +29,10 @@ whole service had to fit in 200 MB. It now runs there, next to other apps.
 - **Your `.gitlab-ci.yml`, mostly unchanged.** `stages`, `needs`, `rules`,
   `workflow`, `extends`, `default`, `services` (docker-in-docker included), manual
   jobs, environments, resource groups. [Full list below](#ci-compatibility).
+- **Or keep your code where it is.** A repository can be a pull mirror of one on
+  GitHub, Bitbucket or any git server, `.gitlab-ci.yml` included: pipe fetches it
+  before every pipeline and reports results back as commit statuses.
+  [More below](#code-that-lives-elsewhere-pull-mirrors).
 - **Runners anywhere.** Linux or macOS, `docker` or `shell` executor. Runners only make
   outgoing HTTPS requests, so a Mac mini behind a home router works fine.
 - **Proper secrets.** CI/CD variables can be file, protected, masked and
@@ -102,6 +106,36 @@ front of port 8080. [`contrib/nginx.conf.example`](contrib/nginx.conf.example) h
 streaming settings git and live logs need. Port 2222 (git over SSH) is served
 directly.
 
+## Code that lives elsewhere (pull mirrors)
+
+When a project's code and its `.gitlab-ci.yml` stay on GitHub, Bitbucket or another
+git server, make its repository here a **mirror** (*New repository → Mirror of*, or
+*Settings → Mirror*): rust-afariano copies it and runs its pipelines, and refuses
+pushes, so the copy never holds a commit the upstream lacks.
+
+- **No stale pipelines.** *Run pipeline* (and the API) fetches the upstream first,
+  so a pipeline always runs on the commit the upstream has now. Between runs, pipe
+  checks every 5 minutes (`RUST_AFARIANO_MIRROR_INTERVAL`), at once when the
+  upstream's webhook calls, or on *Sync now*.
+- **Access, read-only.** For an SSH URL (`git@bitbucket.org:team/app.git`), pipe makes
+  a key for this repository alone: add it on GitHub as a *deploy key* (write access
+  off) or on Bitbucket as an *access key*. For an `https://` URL, give it a token
+  that may read the repository, or none for a public one. The host key is pinned
+  at the first sync.
+- **Webhook (optional).** *Settings → Mirror* shows its URL and secret; GitHub,
+  Bitbucket and GitLab webhooks are understood. Only the signature is checked:
+  the call just starts a sync.
+- **Commit statuses (optional).** With a token (GitHub: *Commit statuses: Read and
+  write*; Bitbucket: a repository access token with *Repositories: Read*), every
+  pipeline shows on its commit and pull request upstream as pending, passed or
+  failed.
+- **Branches** to copy can be limited (`main, release/*`); every tag is copied.
+  Pipelines on push run when a sync brings new commits, if *Create pipelines on
+  push* is on (off for new mirrors); the first sync starts none.
+
+Pipelines keep their commit after the upstream rewrites a branch
+(`refs/pipelines/<id>`, hidden from clients), so retries still work.
+
 ## CI compatibility
 
 rust-afariano reads `.gitlab-ci.yml`. Pipelines that use something it does not
@@ -120,7 +154,7 @@ silently doing something else.
 | `variables` with `description` / `options`: prefilled on *Run pipeline* | |
 | `when: on_success / on_failure / always / manual / never` | |
 | `allow_failure`, `timeout`, `tags` | `retry` and `interruptible` are accepted but have no effect yet |
-| `environment` (name, url), `resource_group` | |
+| `environment` (name, url), `resource_group`, GitLab's *Prevent outdated deployment jobs* | |
 | Predefined `CI_*` variables, `CI_JOB_TOKEN`, `CI_REPOSITORY_URL` | |
 
 Rule expressions support `==`, `!=`, `=~`, `!~`, `&&`, `||`, `!`, parentheses,
@@ -161,6 +195,7 @@ All settings are environment variables (or the same-named flags, see
 | `RUST_AFARIANO_SSH_ADDR` | `0.0.0.0:2222` | Empty disables SSH |
 | `RUST_AFARIANO_SSH_PUBLIC_PORT` | `2222` | Port shown in clone URLs |
 | `RUST_AFARIANO_MAX_PACKS` | `2` | Clones and repacks allowed at the same time |
+| `RUST_AFARIANO_MIRROR_INTERVAL` | `300` | Seconds between two checks of a pull mirror's upstream; `0` turns polling off (webhooks and *Run pipeline* still fetch) |
 | `RUST_AFARIANO_SESSION_TTL_HOURS` | `720` | |
 | `RUST_AFARIANO_LOG` | `info` | Log filter, e.g. `debug,sqlx=warn` |
 

@@ -29,6 +29,7 @@ struct RepoRow {
     status: String,
     status_label: &'static str,
     status_url: String,
+    mirror: String,
 }
 
 #[derive(Template)]
@@ -77,6 +78,7 @@ pub async fn home(State(state): State<Shared>, CurrentUser(user): CurrentUser) -
                 status_label: super::status_label(&status, true),
                 status,
                 status_url,
+                mirror: r.mirror_url.as_deref().map(super::mirror_display).unwrap_or_default(),
             }
         })
         .collect();
@@ -109,6 +111,7 @@ struct NewRepoPage {
     name: String,
     description: String,
     default_branch: String,
+    mirror_url: String,
 }
 
 pub async fn new_form(AdminUser(user): AdminUser) -> AppResult<Response> {
@@ -127,6 +130,7 @@ pub async fn new_form(AdminUser(user): AdminUser) -> AppResult<Response> {
         name: String::new(),
         description: String::new(),
         default_branch: "main".into(),
+        mirror_url: String::new(),
     })
 }
 
@@ -138,6 +142,8 @@ pub struct NewRepoForm {
     description: String,
     #[serde(default)]
     default_branch: String,
+    #[serde(default)]
+    mirror_url: String,
 }
 
 pub async fn create(
@@ -149,17 +155,35 @@ pub async fn create(
     let name = f.name.trim().to_string();
     let branch =
         if f.default_branch.trim().is_empty() { "main".to_string() } else { f.default_branch.trim().to_string() };
-    if let Err(error) = crate::ops::create_repo(&state, &user, &ns, &name, &f.description, &branch).await? {
-        return render(NewRepoPage {
-            user,
-            error: error.into(),
-            namespace: ns,
-            name,
-            description: f.description,
-            default_branch: branch,
-        });
+    let mirror_url = f.mirror_url.trim().to_string();
+    let page = |user, error: &str, f: NewRepoForm| NewRepoPage {
+        user,
+        error: error.into(),
+        namespace: f.namespace.trim().to_string(),
+        name: f.name.trim().to_string(),
+        description: f.description,
+        default_branch: branch.clone(),
+        mirror_url: f.mirror_url,
+    };
+    if !mirror_url.is_empty()
+        && let Err(e) = crate::mirror::Upstream::parse(&mirror_url)
+    {
+        return render(page(user, e, f));
     }
-    Ok(Redirect::to(&format!("/{ns}/{name}")).into_response())
+    let id = match crate::ops::create_repo(&state, &user, &ns, &name, &f.description, &branch).await? {
+        Ok(id) => id,
+        Err(error) => return render(page(user, error, f)),
+    };
+    if mirror_url.is_empty() {
+        return Ok(Redirect::to(&format!("/{ns}/{name}")).into_response());
+    }
+    let repo = state.repo_by_id(id).await?;
+    let input = crate::mirror::MirrorInput { url: mirror_url, branches: None, https_token: None, status_token: None };
+    if let Err(e) = crate::mirror::configure(&state, &repo, input).await? {
+        return Err(AppError::BadRequest(e.into()));
+    }
+    crate::mirror::request_sync(&state, id);
+    Ok(Redirect::to(&format!("/{ns}/{name}/-/settings#mirror")).into_response())
 }
 
 // ---------------------------------------------------------------- code
@@ -228,6 +252,9 @@ struct TreePage {
     commit_count: u64,
     root: bool,
     history_url: String,
+    /// For a mirror: when it last synced, and the error of the last attempt.
+    mirror_synced: String,
+    mirror_error: String,
 }
 
 fn human_size(n: u64) -> String {
@@ -285,7 +312,13 @@ async fn tree_page(
     let git = state.git(repo.id);
     let refs = git.refs().await?;
     let rp = repo.path();
+    let mirror = match repo.is_mirror() {
+        true => crate::mirror::load(&state, repo.id).await?,
+        false => None,
+    };
     let mut page = TreePage {
+        mirror_synced: mirror.as_ref().and_then(|m| m.synced_at).map(ago).unwrap_or_else(|| "never".into()),
+        mirror_error: mirror.and_then(|m| m.error).unwrap_or_default(),
         user,
         nav: RepoNav::new(&repo, role, "code"),
         empty: refs.is_empty(),

@@ -110,6 +110,46 @@ Job statuses: `created` (waiting on deps) → `pending` (runner may take it) →
 - Lost runner: a running job with no log/heartbeat for 10 min fails
   (`runner_system_failure`).
 
+- Prevent outdated deployment jobs (per repository, on by default, like GitLab):
+  when a runner would take a job with an `environment`, and a job of a newer
+  pipeline already succeeded on that environment, the job fails with
+  `outdated_deployment` and a note in its log instead. Retried jobs are exempt
+  (rollback); environment names with `$` (review apps) are not compared.
+- Each pipeline's commit is kept as `refs/pipelines/<id>` (`transfer.hideRefs`:
+  never advertised, never pushable; `uploadpack.allowTipSHA1InWant`), so runners
+  and retries still fetch it after a force push.
+
+## Pull mirrors (`mirror.rs`)
+
+A repository with `mirror_url` copies an upstream; its `mirrors` row holds the
+generated ed25519 key (private half encrypted), pinned `known_hosts`, an optional
+HTTPS token, branch patterns, the webhook secret, an optional commit status token
+and the outcome of the last sync, webhook call and status update.
+
+- A sync holds the repository's push lock: `git ls-remote --symref` (patterns
+  `HEAD refs/heads/* refs/tags/*`, so GitHub's `refs/pull/*` stay out), then, only
+  if a wanted branch or tag differs, `git fetch --prune` with one refspec per
+  pattern plus all tags, under a pack slot. Branches no pattern covers any more are
+  deleted; HEAD follows the upstream's. Then the same path as a push
+  (`push::after_ref_update`, no user): ref diff, pipelines on push, repack.
+  The first sync of an upstream starts no pipelines.
+- git runs with `GIT_ALLOW_PROTOCOL=https:ssh`, no askpass, no credential helper,
+  `GIT_SSH_COMMAND` with `-F /dev/null`, the key and known_hosts written to a
+  0700 temporary directory in the data dir (removed after, and at startup), and
+  `StrictHostKeyChecking=accept-new` only while no host key is pinned. HTTPS
+  tokens go in an `http.extraHeader` from the environment.
+- Triggers: `Run pipeline` and `POST …/pipelines` (synchronous, up to 2 minutes,
+  refuse to start on failure), the poller (every `RUST_AFARIANO_MIRROR_INTERVAL`
+  seconds per mirror, one at a time), webhooks and *Sync now* (queued in the
+  background; webhooks for a mirror already queued coalesce).
+- Pushes to a mirror are refused over HTTP (`403`, text git prints as
+  `remote: …`) and SSH.
+- Commit statuses (`commit_status.rs`): pipeline creation and every pipeline
+  status change queue the pipeline id; one worker reads the current status, skips
+  it if already reported (`pipelines.reported_status`), and posts it to GitHub
+  (`/repos/{owner}/{repo}/statuses/{sha}`, context = server host) or Bitbucket
+  (`/2.0/repositories/{ws}/{slug}/commit/{sha}/statuses/build`, key = server host).
+
 ## Runner
 
 - Config: `~/.config/rust-afariano-runner/config.toml` (or `/etc/rust-afariano-runner/config.toml`

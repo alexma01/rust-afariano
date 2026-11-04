@@ -1,4 +1,5 @@
-//! What happens after `git receive-pack` exits: diff the refs, start pipelines.
+//! What happens after refs change — `git receive-pack` exited, or a mirror fetched
+//! its upstream: diff the refs, start pipelines.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -9,12 +10,23 @@ use crate::models::{Repo, User};
 use crate::pipelines::{self, Created, NewPipeline};
 
 pub async fn after_push(state: Arc<AppState>, repo: Repo, before: BTreeMap<String, String>, user: User) {
+    after_ref_update(&state, repo, before, Some(&user)).await;
+}
+
+/// `by`: who pushed; `None` for a mirror's fetch (its pipelines have no user, like
+/// GitLab's mirror updates). Returns how many refs changed.
+pub async fn after_ref_update(
+    state: &Arc<AppState>,
+    repo: Repo,
+    before: BTreeMap<String, String>,
+    by: Option<&User>,
+) -> usize {
     let git = state.git(repo.id);
     let after = match git.ref_map().await {
         Ok(m) => m,
         Err(e) => {
             tracing::error!(repo = %repo.path(), "reading refs after push: {e:#}");
-            return;
+            return 0;
         }
     };
     let updated: Vec<(String, String)> = after
@@ -22,8 +34,9 @@ pub async fn after_push(state: Arc<AppState>, repo: Repo, before: BTreeMap<Strin
         .filter(|(name, sha)| before.get(*name) != Some(*sha))
         .map(|(n, s)| (n.clone(), s.clone()))
         .collect();
-    if updated.is_empty() && before.len() == after.len() {
-        return;
+    let deleted = before.keys().filter(|k| !after.contains_key(*k)).count();
+    if updated.is_empty() && deleted == 0 {
+        return 0;
     }
     let _ = sqlx::query("UPDATE repos SET pushed_at = now() WHERE id = $1").bind(repo.id).execute(&state.db).await;
 
@@ -45,7 +58,10 @@ pub async fn after_push(state: Arc<AppState>, repo: Repo, before: BTreeMap<Strin
         }
     }
 
-    tracing::info!(repo = %repo.path(), user = %user.email, refs = updated.len(), "push");
+    match by {
+        Some(user) => tracing::info!(repo = %repo.path(), user = %user.email, refs = updated.len(), "push"),
+        None => tracing::info!(repo = %repo.path(), refs = updated.len(), deleted, "mirror updated"),
+    }
     if repo.pipelines_on_push {
         for (name, sha) in &updated {
             let (ref_name, is_tag) = match (name.strip_prefix("refs/heads/"), name.strip_prefix("refs/tags/")) {
@@ -60,10 +76,10 @@ pub async fn after_push(state: Arc<AppState>, repo: Repo, before: BTreeMap<Strin
                 sha: sha.clone(),
                 before_sha: before.get(name).cloned().unwrap_or_else(|| ZERO_SHA.to_string()),
                 source: "push",
-                user: Some(&user),
+                user: by,
                 variables: Vec::new(),
             };
-            match pipelines::create(&state, np).await {
+            match pipelines::create(state, np).await {
                 Ok(Created::Pipeline(iid)) => tracing::debug!(iid, "push pipeline"),
                 Ok(other) => tracing::debug!(?other, "no push pipeline"),
                 Err(e) => tracing::error!(repo = %repo.path(), "creating pipeline: {e:#}"),
@@ -74,4 +90,5 @@ pub async fn after_push(state: Arc<AppState>, repo: Repo, before: BTreeMap<Strin
     if let Ok(_permit) = state.pack_slots.clone().acquire_owned().await {
         git.maintain().await;
     }
+    updated.len() + deleted
 }

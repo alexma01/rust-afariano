@@ -14,16 +14,100 @@
     <label class="field"><span>Description</span><input type="text" name="description" value="{{ repo.description }}"></label>
     <div class="row2">
       <label class="field"><span>Default branch</span>
-        {% if branches.is_empty() %}<input type="text" name="default_branch" value="{{ repo.default_branch }}">
+        {% if nav.is_mirror() %}<input type="text" name="default_branch" value="{{ repo.default_branch }}" readonly>
+          <span class="hint">Follows the upstream's default branch.</span>
+        {% else if branches.is_empty() %}<input type="text" name="default_branch" value="{{ repo.default_branch }}">
         {% else %}<select name="default_branch">{% for b in branches %}<option{% if *b == repo.default_branch %} selected{% endif %}>{{ b }}</option>{% endfor %}</select>{% endif %}
       </label>
       <label class="field"><span>Protected branches</span><input type="text" name="protected_branches" value="{{ repo.protected_branches }}">
         <span class="hint">Comma separated, <code>*</code> as wildcard. Protected variables reach only these branches and tags.</span></label>
     </div>
     <label class="check"><input type="checkbox" name="pipelines_on_push" value="1"{% if repo.pipelines_on_push %} checked{% endif %}>
-      <span>Create pipelines on push<span class="hint">The file's <code>workflow:rules</code> still decide whether one runs.</span></span></label>
+      <span>Create pipelines on push<span class="hint">{% if nav.is_mirror() %}For a mirror: when a sync brings new commits. {% endif %}The file's <code>workflow:rules</code> still decide whether one runs.</span></span></label>
+    <label class="check"><input type="checkbox" name="prevent_outdated_deploys" value="1"{% if repo.prevent_outdated_deploys %} checked{% endif %}>
+      <span>Prevent outdated deployment jobs<span class="hint">A job with an <code>environment</code> does not run when a newer pipeline already deployed there. Retrying an old deployment job still works, to roll back on purpose.</span></span></label>
     <div><button class="btn confirm" type="submit">Save changes</button></div>
   </form>
+</section>
+
+<section class="settings-section" id="mirror">
+{% match mirror %}
+{% when Some with (m) %}
+  <header><h2>Mirror</h2>
+    <p>This repository copies {% if nav.mirror_web.is_empty() %}<code>{{ nav.mirror }}</code>{% else %}<a href="{{ nav.mirror_web }}" rel="noopener">{{ nav.mirror }}</a>{% endif %}, its code and its <code>.gitlab-ci.yml</code>. Pipe fetches it every few minutes, when the upstream's webhook calls, and right before every pipeline you start, and refuses pushes.</p></header>
+  <div class="mirror-settings">
+    {% if m.error.is_empty() %}
+    <div class="alert ok">{% call ui::icon("success") %}{% endcall %}<div>Last synced {{ m.synced }}{% if m.synced != m.checked %}, checked {{ m.checked }}{% endif %}.</div></div>
+    {% else %}
+    <div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div><strong>The last sync ({{ m.checked }}) failed.</strong> {{ m.error }}{% if m.synced != "never" %} Last good sync: {{ m.synced }}.{% endif %}</div></div>
+    {% endif %}
+    <form method="post" action="/{{ nav.path }}/-/settings/mirror/sync"><input type="hidden" name="back" value="settings"><button class="btn" type="submit">{% call ui::i("retry") %}{% endcall %}Sync now</button></form>
+
+    {% if m.ssh %}
+    <h3>Read-only key</h3>
+    <p class="hint">{% if m.forge == "GitHub" %}On GitHub: repository <strong>Settings → Deploy keys → Add deploy key</strong>, paste it, leave <em>Allow write access</em> unticked.{% else if m.forge == "Bitbucket" %}On Bitbucket: <strong>Repository settings → Access keys → Add key</strong>, paste it (access keys are read-only).{% else %}Give this key read access to the repository on the upstream.{% endif %}</p>
+    <pre class="cmd wrap" id="mirror-key">{{ m.public_key }}</pre>
+    <div class="actions"><button class="btn sm" type="button" data-copy="mirror-key"><span data-label>Copy key</span></button></div>
+    {% if m.host_keys.is_empty() %}
+    <p class="hint">The upstream's SSH host key is pinned at the first sync that reaches it.</p>
+    {% else %}
+    <div class="field"><span>Pinned host key</span>{% for k in m.host_keys %}<code class="hint">{{ k }}</code>{% endfor %}
+      <span class="hint">Compare it with the fingerprint the host publishes. A sync fails if the host presents another key.</span></div>
+    <form method="post" action="/{{ nav.path }}/-/settings/mirror/forget-host" data-confirm="Forget the pinned host key? The next sync trusts whatever key the upstream presents."><button class="btn sm" type="submit">Forget host key</button></form>
+    {% endif %}
+    {% endif %}
+
+    <form class="stack" method="post" action="/{{ nav.path }}/-/settings/mirror">
+      <h3>Upstream</h3>
+      <label class="field"><span>Clone URL</span><input type="text" name="url" value="{{ m.url }}" autocomplete="off" spellcheck="false"{% if !user.is_admin %} readonly{% endif %}>
+        <span class="hint">{% if user.is_admin %}SSH (<code>git@host:owner/repo.git</code>) uses the key above; https uses the token below.{% else %}Administrators change the URL.{% endif %}</span></label>
+      <label class="field"><span>Branches</span><input type="text" name="branches" value="{{ m.branches }}" autocomplete="off" spellcheck="false">
+        <span class="hint">Comma separated, <code>*</code> as wildcard. Every tag is copied. Branches no longer listed are deleted here at the next sync.</span></label>
+      {% if !m.ssh %}
+      <label class="field"><span>HTTPS token {% if m.has_https_token %}<span class="pill">Set</span>{% endif %}</span><input type="password" name="https_token" autocomplete="off" placeholder="{% if m.has_https_token %}Leave empty to keep it{% else %}Empty for a public repository{% endif %}">
+        <span class="hint">A token that may read the repository: GitHub fine-grained token with <em>Contents: Read</em>; Bitbucket repository access token with <em>Repositories: Read</em>. <code>user:token</code> sets the user name too.</span></label>
+      {% if m.has_https_token %}<label class="check"><input type="checkbox" name="clear_https_token" value="1"><span>Remove the HTTPS token</span></label>{% endif %}
+      {% endif %}
+      <h3>Commit statuses</h3>
+      {% if m.forge.is_empty() %}
+      <p class="hint">Pipe reports pipeline results to github.com, *.ghe.com and bitbucket.org only.</p>
+      {% else %}
+      <p class="hint">With a token, every pipeline shows on its commit in {{ m.forge }} (pending, passed, failed){% if m.has_status_token %}: last sent {{ m.status }}{% endif %}.</p>
+      {% if !m.status_error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ m.status_error }}</div></div>{% endif %}
+      <label class="field"><span>Status token {% if m.has_status_token %}<span class="pill">Set</span>{% endif %}</span><input type="password" name="status_token" autocomplete="off" placeholder="{% if m.has_status_token %}Leave empty to keep it{% else %}No statuses are sent without one{% endif %}">
+        <span class="hint">{% if m.forge == "GitHub" %}A fine-grained token for this repository with <em>Commit statuses: Read and write</em> (or a classic token with <code>repo:status</code>), from an account with write access.{% else %}A repository access token with <em>Repositories: Read</em> (the same one can serve the https URL), or <code>email:API token</code>.{% endif %}</span></label>
+      {% if m.has_status_token %}<label class="check"><input type="checkbox" name="clear_status_token" value="1"><span>Stop sending statuses (remove the token)</span></label>{% endif %}
+      {% endif %}
+      <div><button class="btn confirm" type="submit">Save mirror settings</button></div>
+    </form>
+
+    <h3>Webhook</h3>
+    <p class="hint">Optional: the upstream calls it on every push, so pipe syncs at once instead of within a few minutes. {% if m.forge == "GitHub" %}On GitHub: <strong>Settings → Webhooks → Add webhook</strong>, content type <code>application/json</code>, <em>Just the push event</em>.{% else if m.forge == "Bitbucket" %}On Bitbucket: <strong>Repository settings → Webhooks → Add webhook</strong>, trigger <em>Repository push</em>.{% else %}GitHub, Bitbucket and GitLab webhooks are understood.{% endif %}</p>
+    <label class="field"><span>URL</span><span class="input-group"><input id="mirror-hook" type="text" readonly value="{{ m.webhook_url }}"><button class="btn icon" type="button" data-copy="mirror-hook" aria-label="Copy webhook URL">{% call ui::i("copy") %}{% endcall %}</button></span></label>
+    <details><summary class="hint">Show the secret</summary>
+      <span class="input-group"><input id="mirror-secret" type="text" readonly value="{{ m.webhook_secret }}" data-exact><button class="btn icon" type="button" data-copy="mirror-secret" aria-label="Copy webhook secret">{% call ui::i("copy") %}{% endcall %}</button></span>
+    </details>
+    <p class="hint">Last call: {{ m.hook }}{% if !m.hook_error.is_empty() %}, <strong>refused</strong>: {{ m.hook_error }}{% endif %}.</p>
+    <form method="post" action="/{{ nav.path }}/-/settings/mirror/secret" data-confirm="Make a new secret? The upstream's webhook stops working until you put the new one there."><button class="btn sm" type="submit">New secret</button></form>
+
+    {% if user.is_admin %}
+    <h3>Stop mirroring</h3>
+    <p class="hint">The repository keeps its branches and tags and accepts pushes again.</p>
+    <form method="post" action="/{{ nav.path }}/-/settings/mirror/delete" data-confirm="Stop mirroring {{ nav.mirror }}? Pushes to {{ nav.path }} are accepted again."><button class="btn danger" type="submit">Stop mirroring</button></form>
+    {% endif %}
+  </div>
+{% when None %}
+  <header><h2>Mirror</h2><p>For code that lives on GitHub, Bitbucket or another server, <code>.gitlab-ci.yml</code> included: pipe copies it, runs its pipelines, and refuses pushes here.</p></header>
+  {% if user.is_admin %}
+  <form class="stack" method="post" action="/{{ nav.path }}/-/settings/mirror" data-confirm="Mirror this repository? Branches and tags the upstream does not have are deleted at the first sync, and pushes here are refused from now on.">
+    <label class="field"><span>Upstream clone URL</span><input type="text" name="url" placeholder="git@bitbucket.org:team/project.git" autocomplete="off" spellcheck="false" required>
+      <span class="hint">SSH: pipe makes a read-only key for you to add on the upstream. https: for public repositories, or with a token afterwards.</span></label>
+    <div><button class="btn confirm" type="submit">Start mirroring</button></div>
+  </form>
+  {% else %}
+  <p class="hint">Administrators can turn a repository into a mirror.</p>
+  {% endif %}
+{% endmatch %}
 </section>
 
 <section class="settings-section" id="members">

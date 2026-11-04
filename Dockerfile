@@ -36,7 +36,7 @@ LABEL org.opencontainers.image.title="rust-afariano" \
       org.opencontainers.image.description="Self-hosted Git and GitLab-style CI in one small Rust binary" \
       org.opencontainers.image.source="https://github.com/frank10gm/rust-afariano" \
       org.opencontainers.image.licenses="MIT OR Apache-2.0"
-RUN apk add --no-cache git ca-certificates tini \
+RUN apk add --no-cache git openssh-client-default ca-certificates tini \
     && adduser -D -h /data -u 10001 rust-afariano
 COPY --from=build /out/rust-afariano /usr/local/bin/rust-afariano
 USER rust-afariano

@@ -43,6 +43,18 @@ Know these before you deploy:
 - **Tokens** (personal access tokens, runner tokens, job tokens) are stored as
   SHA-256 hashes. Job tokens are valid only while their job runs and only for
   cloning their own repository.
+- **Pull mirrors** copy a repository from another server (GitHub, Bitbucket, …)
+  and refuse pushes, so the upstream decides what runs: anyone who can push to
+  the upstream's protected branch reaches the protected variables here. Protect
+  that branch on the upstream. Only administrators set a mirror's URL, and only
+  `https://` and SSH URLs are accepted (no local paths, `file://`, `ext::` or
+  plain http; git runs with `GIT_ALLOW_PROTOCOL=https:ssh`). The mirror's SSH key
+  is generated per repository, meant to be read-only on the upstream, and stored
+  encrypted like CI/CD variables, as are its HTTPS and commit status tokens and
+  webhook secret. The upstream's SSH host key is pinned at the first contact;
+  check its fingerprint in *Settings → Mirror*. Webhook calls must be signed with
+  the mirror's secret (HMAC-SHA256, compared in constant time); their content is
+  never used, they only trigger a fetch.
 - **Put TLS in front.** The server speaks plain HTTP; run it behind a reverse
   proxy with HTTPS (see `contrib/nginx.conf.example`) and set
   `RUST_AFARIANO_PUBLIC_URL` to the `https://` address so cookies are marked

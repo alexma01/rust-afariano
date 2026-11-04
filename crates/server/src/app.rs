@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use sqlx::PgPool;
@@ -32,6 +32,11 @@ pub struct AppState {
     pub hash_slots: Semaphore,
     /// OpenID provider metadata, fetched on first use.
     pub oidc: tokio::sync::Mutex<Option<crate::auth::OidcProvider>>,
+    /// Mirrors with a background sync waiting to start (webhooks coalesce into it).
+    pub mirror_queued: Mutex<HashSet<i64>>,
+    /// Pipelines whose status changed, for the commit status worker.
+    pub status_tx: tokio::sync::mpsc::UnboundedSender<i64>,
+    pub status_rx: Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<i64>>>,
 }
 
 impl AppState {
@@ -41,7 +46,11 @@ impl AppState {
             .user_agent(concat!("rust-afariano/", env!("CARGO_PKG_VERSION")))
             .build()?;
         let cipher = crate::secrets::Cipher::load(cfg.secret_key.as_deref(), &cfg.data_dir)?;
+        let (status_tx, status_rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(Self {
+            mirror_queued: Mutex::new(HashSet::new()),
+            status_tx,
+            status_rx: Mutex::new(Some(status_rx)),
             cipher,
             setup_token: Mutex::new(None),
             limiter: Limiter::default(),

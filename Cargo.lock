@@ -2458,7 +2458,7 @@ dependencies = [
 
 [[package]]
 name = "rust-afariano"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2471,6 +2471,7 @@ dependencies = [
  "clap",
  "flate2",
  "futures-util",
+ "hmac",
  "pulldown-cmark",
  "rand",
  "reqwest",
@@ -2491,7 +2492,7 @@ dependencies = [
 
 [[package]]
 name = "rust-afariano-ci"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "regex",
  "rust-afariano-proto",
@@ -2503,14 +2504,14 @@ dependencies = [
 
 [[package]]
 name = "rust-afariano-proto"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "rust-afariano-runner"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",

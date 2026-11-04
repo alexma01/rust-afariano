@@ -61,6 +61,9 @@ async fn access(
         (Principal::User(user), Some(repo)) => {
             let need = if service == Service::Receive { Role::Write } else { Role::Read };
             access::require(state, user, &repo, need).await?;
+            if service == Service::Receive && repo.is_mirror() {
+                return Err(AppError::GitRefused(crate::mirror::push_refused(&repo)));
+            }
             Ok((repo, principal))
         }
         (Principal::User(_), None) => Err(AppError::NotFound),

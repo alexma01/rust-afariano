@@ -152,6 +152,13 @@ pub async fn trigger_pipeline(
     Json(body): Json<TriggerBody>,
 ) -> AppResult<Response> {
     let (repo, _) = crate::access::repo(&state, &user, &ns, &name, crate::access::Role::Write).await?;
+    if repo.is_mirror()
+        && let Err(e) = crate::mirror::sync_for_pipeline(&state, &repo).await
+    {
+        return Err(crate::error::AppError::BadGateway(format!(
+            "no pipeline started: could not fetch the upstream. {e}"
+        )));
+    }
     let git = state.git(repo.id);
     let (full, is_tag) = if git.resolve(&format!("refs/heads/{}", body.ref_name)).await?.is_some() {
         (format!("refs/heads/{}", body.ref_name), false)

@@ -36,12 +36,20 @@ pub struct Repo {
     pub pipelines_on_push: bool,
     pub created_at: DateTime<Utc>,
     pub pushed_at: Option<DateTime<Utc>>,
+    /// Set for a pull mirror: the upstream it copies. Pushes to it are refused.
+    pub mirror_url: Option<String>,
+    /// Jobs with an environment do not run when a newer pipeline already deployed there.
+    pub prevent_outdated_deploys: bool,
 }
 
-pub const REPO_COLS: &str =
-    "id, namespace, name, description, default_branch, protected_branches, pipelines_on_push, created_at, pushed_at";
+pub const REPO_COLS: &str = "id, namespace, name, description, default_branch, protected_branches, pipelines_on_push, \
+     created_at, pushed_at, mirror_url, prevent_outdated_deploys";
 
 impl Repo {
+    pub fn is_mirror(&self) -> bool {
+        self.mirror_url.is_some()
+    }
+
     pub fn path(&self) -> String {
         format!("{}/{}", self.namespace, self.name)
     }

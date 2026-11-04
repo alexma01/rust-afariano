@@ -68,6 +68,11 @@ pub fn router(state: Shared) -> Router {
         .route("/{ns}/{name}/-/settings/delete", post(settings::delete_repo))
         .route("/{ns}/{name}/-/settings/members", post(settings::save_member))
         .route("/{ns}/{name}/-/settings/members/{user_id}/delete", post(settings::delete_member))
+        .route("/{ns}/{name}/-/settings/mirror", post(settings::save_mirror))
+        .route("/{ns}/{name}/-/settings/mirror/sync", post(settings::sync_mirror))
+        .route("/{ns}/{name}/-/settings/mirror/forget-host", post(settings::forget_mirror_host))
+        .route("/{ns}/{name}/-/settings/mirror/secret", post(settings::new_mirror_secret))
+        .route("/{ns}/{name}/-/settings/mirror/delete", post(settings::stop_mirror))
         .layer(middleware::from_fn_with_state(state.clone(), auth::same_origin));
 
     let git = Router::new()
@@ -83,6 +88,9 @@ pub fn router(state: Shared) -> Router {
         .route("/api/v1/runner/jobs/{id}/finish", post(runner_api::finish_job))
         .route("/api/v1/repos", post(api::create_repo))
         .route("/api/v1/repos/{ns}/{name}", get(api::get_repo).patch(api::patch_repo))
+        .route("/api/v1/repos/{ns}/{name}/mirror", get(api::get_mirror).put(api::put_mirror).delete(api::delete_mirror))
+        .route("/api/v1/repos/{ns}/{name}/mirror/sync", post(api::sync_mirror))
+        .route("/api/v1/repos/{ns}/{name}/mirror/secret", post(api::new_mirror_secret))
         .route("/api/v1/repos/{ns}/{name}/members", get(api::list_members))
         .route("/api/v1/repos/{ns}/{name}/members/{user}", put(api::put_member).delete(api::delete_member))
         .route("/api/v1/repos/{ns}/{name}/variables", get(api::list_variables))
@@ -99,10 +107,17 @@ pub fn router(state: Shared) -> Router {
         .layer(DefaultBodyLimit::max(2 << 20))
         .layer(middleware::map_response(crate::error::json_errors));
 
+    // Webhook payloads can be larger than API bodies; only their signature is checked.
+    let hooks = Router::new()
+        .route("/api/v1/repos/{ns}/{name}/mirror/hook", post(api::mirror_hook))
+        .layer(DefaultBodyLimit::max(8 << 20))
+        .layer(middleware::map_response(crate::error::json_errors));
+
     Router::new()
         .merge(pages)
         .merge(git)
         .merge(api)
+        .merge(hooks)
         .route("/auth/login", get(auth::login))
         .route("/auth/oidc", get(auth::oidc_start))
         .route("/auth/oidc/callback", get(auth::oidc_callback))
@@ -169,6 +184,10 @@ pub struct RepoNav {
     pub tab: &'static str,
     /// The viewer's role, deciding which tabs and buttons show.
     pub role: Role,
+    /// For a pull mirror: its upstream (`bitbucket.org/molecle/davegantt`); else empty.
+    pub mirror: String,
+    /// The upstream's web page, if known.
+    pub mirror_web: String,
 }
 
 impl RepoNav {
@@ -182,7 +201,18 @@ impl RepoNav {
             hue: hue(&repo.path()),
             initial: initial(&repo.name),
             tab,
+            mirror: repo.mirror_url.as_deref().map(mirror_display).unwrap_or_default(),
+            mirror_web: repo
+                .mirror_url
+                .as_deref()
+                .and_then(|u| crate::mirror::Upstream::parse(u).ok())
+                .and_then(|u| u.web_url())
+                .unwrap_or_default(),
         }
+    }
+
+    pub fn is_mirror(&self) -> bool {
+        !self.mirror.is_empty()
     }
 
     pub fn can_write(&self) -> bool {
@@ -192,6 +222,10 @@ impl RepoNav {
     pub fn can_maintain(&self) -> bool {
         self.role >= Role::Maintain
     }
+}
+
+pub fn mirror_display(url: &str) -> String {
+    crate::mirror::Upstream::parse(url).map(|u| u.display()).unwrap_or_else(|_| url.to_string())
 }
 
 /// A stable hue per name, for the coloured avatar tiles (like GitLab's identicons).

@@ -33,6 +33,8 @@ fn repo_json(state: &AppState, repo: &Repo, role: Role) -> Value {
         "default_branch": repo.default_branch,
         "protected_branches": repo.protected_branches.split(',').map(str::trim).filter(|p| !p.is_empty()).collect::<Vec<_>>(),
         "pipelines_on_push": repo.pipelines_on_push,
+        "prevent_outdated_deploys": repo.prevent_outdated_deploys,
+        "mirror_url": repo.mirror_url,
         "role": role.as_str(),
         "web_url": format!("{}/{path}", cfg.public_url),
         "http_url": cfg.http_clone_url(&path),
@@ -52,10 +54,13 @@ pub struct NewRepo {
     protected_branches: Option<Vec<String>>,
     #[serde(default)]
     pipelines_on_push: Option<bool>,
+    #[serde(default)]
+    mirror: Option<MirrorBody>,
 }
 
 /// `POST /api/v1/repos` `{"namespace", "name", "description"?, "default_branch"?,
-/// "protected_branches"?, "pipelines_on_push"?}` (administrators).
+/// "protected_branches"?, "pipelines_on_push"?, "mirror"?}` (administrators).
+/// `mirror` (`{"url", "branches"?, "https_token"?, "status_token"?}`) makes it a pull mirror.
 pub async fn create_repo(
     State(state): State<Shared>,
     TokenUser2(user): TokenUser2,
@@ -65,8 +70,19 @@ pub async fn create_repo(
     let ns = b.namespace.trim();
     let name = b.name.trim();
     let branch = b.default_branch.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("main");
+    if let Some(m) = &b.mirror {
+        crate::mirror::Upstream::parse(&m.url).map_err(bad)?;
+        if let Some(br) = &m.branches {
+            crate::mirror::parse_branches(br).map_err(bad)?;
+        }
+    }
     let id = ops::create_repo(&state, &user, ns, name, &b.description, branch).await?.map_err(bad)?;
     let mut repo = state.repo_by_id(id).await?;
+    if let Some(m) = b.mirror {
+        crate::mirror::configure(&state, &repo, m.into_input()).await?.map_err(bad)?;
+        crate::mirror::request_sync(&state, id);
+        repo = state.repo_by_id(id).await?;
+    }
     if b.protected_branches.is_some() || b.pipelines_on_push.is_some() {
         let mut s = ops::RepoSettings::of(&repo);
         if let Some(p) = b.protected_branches {
@@ -97,6 +113,7 @@ pub struct RepoPatch {
     default_branch: Option<String>,
     protected_branches: Option<Vec<String>>,
     pipelines_on_push: Option<bool>,
+    prevent_outdated_deploys: Option<bool>,
 }
 
 /// `PATCH /api/v1/repos/{ns}/{name}` — changes only the fields given (maintain).
@@ -120,10 +137,162 @@ pub async fn patch_repo(
     if let Some(v) = b.pipelines_on_push {
         s.pipelines_on_push = v;
     }
+    if let Some(v) = b.prevent_outdated_deploys {
+        s.prevent_outdated_deploys = v;
+    }
     ops::update_repo(&state, &repo, s).await?.map_err(bad)?;
     tracing::info!(repo = %repo.path(), by = %user.email, "repository settings changed");
     let repo = state.repo_by_id(repo.id).await?;
     Ok(Json(repo_json(&state, &repo, role)))
+}
+
+// ---------------------------------------------------------------- mirrors
+
+#[derive(Deserialize)]
+pub struct MirrorBody {
+    url: String,
+    #[serde(default)]
+    branches: Option<String>,
+    /// `""` removes it; absent keeps it.
+    #[serde(default)]
+    https_token: Option<String>,
+    #[serde(default)]
+    status_token: Option<String>,
+}
+
+impl MirrorBody {
+    fn into_input(self) -> crate::mirror::MirrorInput {
+        crate::mirror::MirrorInput {
+            url: self.url,
+            branches: self.branches,
+            https_token: self.https_token,
+            status_token: self.status_token,
+        }
+    }
+}
+
+async fn mirror_json(state: &AppState, repo: &Repo) -> AppResult<Value> {
+    let url = repo.mirror_url.clone().ok_or_else(|| bad("this repository is not a mirror"))?;
+    let m = crate::mirror::load(state, repo.id).await?.ok_or(AppError::NotFound)?;
+    let up = crate::mirror::Upstream::parse(&url).ok();
+    let ssh = up.as_ref().is_some_and(|u| u.transport == crate::mirror::Transport::Ssh);
+    Ok(json!({
+        "url": url,
+        "upstream": up.as_ref().map(|u| u.display()),
+        "ssh_public_key": ssh.then_some(&m.ssh_public_key),
+        "host_keys": crate::mirror::host_fingerprints(&m.known_hosts),
+        "branches": m.branches,
+        "has_https_token": m.https_token.is_some(),
+        "synced_at": m.synced_at,
+        "checked_at": m.checked_at,
+        "error": m.error,
+        "webhook_url": crate::mirror::webhook_url(state, repo),
+        "webhook_secret": state.cipher.decrypt(&m.webhook_secret)?,
+        "hook_at": m.hook_at,
+        "hook_error": m.hook_error,
+        "forge": up.as_ref().and_then(|u| u.forge()).map(|f| f.name()),
+        "has_status_token": m.status_token.is_some(),
+        "status_at": m.status_at,
+        "status_error": m.status_error,
+    }))
+}
+
+/// `GET /api/v1/repos/{ns}/{name}/mirror` — key, sync state, webhook (maintain).
+pub async fn get_mirror(
+    State(state): State<Shared>,
+    TokenUser2(user): TokenUser2,
+    Path((ns, name)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let (repo, _) = access::repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    Ok(Json(mirror_json(&state, &repo).await?))
+}
+
+/// `PUT /api/v1/repos/{ns}/{name}/mirror` `{"url", "branches"?, "https_token"?, "status_token"?}`
+/// — makes the repository a mirror, or changes its mirror settings. Maintainers may
+/// change everything but the URL, which is for administrators.
+pub async fn put_mirror(
+    State(state): State<Shared>,
+    TokenUser2(user): TokenUser2,
+    Path((ns, name)): Path<(String, String)>,
+    Json(b): Json<MirrorBody>,
+) -> AppResult<Json<Value>> {
+    let (repo, _) = access::repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    if repo.mirror_url.as_deref() != Some(b.url.trim()) {
+        require_admin(&user)?;
+    }
+    crate::mirror::configure(&state, &repo, b.into_input()).await?.map_err(bad)?;
+    tracing::info!(repo = %repo.path(), by = %user.email, "mirror settings saved");
+    crate::mirror::request_sync(&state, repo.id);
+    let repo = state.repo_by_id(repo.id).await?;
+    Ok(Json(mirror_json(&state, &repo).await?))
+}
+
+/// `DELETE /api/v1/repos/{ns}/{name}/mirror` — an ordinary repository again (administrators).
+pub async fn delete_mirror(
+    State(state): State<Shared>,
+    TokenUser2(user): TokenUser2,
+    Path((ns, name)): Path<(String, String)>,
+) -> AppResult<StatusCode> {
+    require_admin(&user)?;
+    let (repo, _) = access::repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    crate::mirror::stop(&state, &repo).await?;
+    tracing::warn!(repo = %repo.path(), by = %user.email, "mirroring stopped");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/v1/repos/{ns}/{name}/mirror/sync` — fetches the upstream now (write).
+pub async fn sync_mirror(
+    State(state): State<Shared>,
+    TokenUser2(user): TokenUser2,
+    Path((ns, name)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let (repo, _) = access::repo(&state, &user, &ns, &name, Role::Write).await?;
+    if !repo.is_mirror() {
+        return Err(bad("this repository is not a mirror"));
+    }
+    let synced = crate::mirror::sync_for_pipeline(&state, &repo).await.map_err(AppError::BadGateway)?;
+    let m = crate::mirror::load(&state, repo.id).await?.ok_or(AppError::NotFound)?;
+    Ok(Json(json!({ "changed": synced.changed, "synced_at": m.synced_at })))
+}
+
+/// `POST /api/v1/repos/{ns}/{name}/mirror/secret` — a new webhook secret (maintain).
+pub async fn new_mirror_secret(
+    State(state): State<Shared>,
+    TokenUser2(user): TokenUser2,
+    Path((ns, name)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let (repo, _) = access::repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    if !repo.is_mirror() {
+        return Err(bad("this repository is not a mirror"));
+    }
+    let secret = crate::mirror::new_webhook_secret(&state, repo.id).await?;
+    Ok(Json(json!({ "webhook_secret": secret })))
+}
+
+/// `POST /api/v1/repos/{ns}/{name}/mirror/hook` — the upstream's webhook. No token:
+/// the call is signed with the mirror's secret (GitHub, Bitbucket) or carries it
+/// (GitLab). Its content is not read; it only queues a sync. Every refusal answers
+/// 404, like a repository that does not exist; Settings → Mirror shows why.
+pub async fn mirror_hook(
+    State(state): State<Shared>,
+    Path((ns, name)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> AppResult<Response> {
+    let repo = state.repo_by_path(&ns, &name).await?.ok_or(AppError::NotFound)?;
+    if !repo.is_mirror() {
+        return Err(AppError::NotFound);
+    }
+    let m = crate::mirror::load(&state, repo.id).await?.ok_or(AppError::NotFound)?;
+    let secret = state.cipher.decrypt(&m.webhook_secret)?;
+    if let Err(why) = crate::mirror::verify_webhook(&secret, &headers, &body) {
+        tracing::warn!(repo = %repo.path(), "mirror webhook refused: {why}");
+        crate::mirror::record_hook(&state, repo.id, Some(why)).await;
+        return Err(AppError::NotFound);
+    }
+    crate::mirror::record_hook(&state, repo.id, None).await;
+    crate::mirror::request_sync(&state, repo.id);
+    Ok((StatusCode::ACCEPTED, Json(json!({ "message": "sync queued" }))).into_response())
 }
 
 // ---------------------------------------------------------------- members

@@ -209,6 +209,9 @@ impl russh::server::Handler for Conn {
             None => None,
         };
         let allowed = match (repo, role) {
+            (Some(repo), Some(role)) if role >= need && service == "receive-pack" && repo.is_mirror() => {
+                Err(format!("{}\n", crate::mirror::push_refused(&repo)))
+            }
             (Some(repo), Some(role)) if role >= need => Ok(repo),
             // Same answer as a missing repository, so names cannot be probed.
             (_, None) | (None, _) => Err(format!("Repository {ns}/{name} not found.\n")),

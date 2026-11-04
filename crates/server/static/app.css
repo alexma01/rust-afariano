@@ -466,3 +466,17 @@ details.dropdown > summary::-webkit-details-marker { display: none; }
   table.t th, table.t td { padding-left: 12px; padding-right: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
+
+/* Settings → Mirror: several small forms and blocks in one column. */
+.mirror-settings { display: grid; gap: 12px; max-width: 640px; min-width: 0; }
+.mirror-settings > h3, .mirror-settings > form.stack > h3 { margin-top: 14px; }
+.mirror-settings > form.stack > h3:first-child { margin-top: 14px; }
+.mirror-settings .alert { margin-bottom: 0; }
+.mirror-settings p { margin: 0; }
+pre.cmd.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Pull mirror banner on the repository page. */
+.mirror-bar { align-items: center; }
+.mirror-bar > svg.i { flex: none; margin-top: 1px; }
+.mirror-bar form { flex: none; }
+@media (max-width: 640px) { .mirror-bar { flex-wrap: wrap; } }

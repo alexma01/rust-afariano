@@ -16,6 +16,12 @@ pub enum AppError {
     GitAuth,
     #[error("unauthorized")]
     Unauthorized,
+    /// Another server we depend on (a mirror's upstream) failed.
+    #[error("{0}")]
+    BadGateway(String),
+    /// A git request refused with a reason the git client prints (`remote: …`).
+    #[error("{0}")]
+    GitRefused(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -51,7 +57,16 @@ impl IntoResponse for AppError {
             Self::NotFound => (StatusCode::NOT_FOUND, "Not found".to_string()),
             Self::Forbidden => (StatusCode::FORBIDDEN, "Forbidden".to_string()),
             Self::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
+            Self::BadGateway(m) => (StatusCode::BAD_GATEWAY, m.clone()),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
+            Self::GitRefused(m) => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    format!("{m}\n"),
+                )
+                    .into_response();
+            }
             Self::GitAuth => {
                 return (
                     StatusCode::UNAUTHORIZED,

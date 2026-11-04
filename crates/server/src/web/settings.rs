@@ -358,6 +358,57 @@ struct Candidate {
     label: String,
 }
 
+/// Settings → Mirror of a pull mirror.
+pub(super) struct MirrorView {
+    url: String,
+    ssh: bool,
+    public_key: String,
+    host_keys: Vec<String>,
+    has_https_token: bool,
+    branches: String,
+    synced: String,
+    checked: String,
+    error: String,
+    webhook_url: String,
+    webhook_secret: String,
+    hook: String,
+    hook_error: String,
+    /// `GitHub`, `Bitbucket`, or empty for other hosts.
+    forge: String,
+    has_status_token: bool,
+    status: String,
+    status_error: String,
+}
+
+impl MirrorView {
+    pub(super) async fn load(state: &Shared, repo: &Repo) -> AppResult<Option<Self>> {
+        let (Some(url), Some(m)) = (repo.mirror_url.clone(), crate::mirror::load(state, repo.id).await?) else {
+            return Ok(None);
+        };
+        let up = crate::mirror::Upstream::parse(&url).ok();
+        let when = |t: Option<chrono::DateTime<Utc>>| t.map(ago).unwrap_or_else(|| "never".into());
+        Ok(Some(Self {
+            ssh: up.as_ref().is_some_and(|u| u.transport == crate::mirror::Transport::Ssh),
+            forge: up.as_ref().and_then(|u| u.forge()).map(|f| f.name().to_string()).unwrap_or_default(),
+            url,
+            public_key: m.ssh_public_key,
+            host_keys: crate::mirror::host_fingerprints(&m.known_hosts),
+            has_https_token: m.https_token.is_some(),
+            branches: m.branches,
+            synced: when(m.synced_at),
+            checked: when(m.checked_at),
+            error: m.error.unwrap_or_default(),
+            webhook_url: crate::mirror::webhook_url(state, repo),
+            webhook_secret: state.cipher.decrypt(&m.webhook_secret).unwrap_or_else(|_| "(cannot decrypt)".into()),
+            hook: when(m.hook_at),
+            hook_error: m.hook_error.unwrap_or_default(),
+            has_status_token: m.status_token.is_some(),
+            status: when(m.status_at),
+            status_error: m.status_error.unwrap_or_default(),
+        }))
+    }
+}
+
 #[derive(Template)]
 #[template(path = "repo_settings.html")]
 struct RepoSettingsPage {
@@ -369,6 +420,7 @@ struct RepoSettingsPage {
     members: Vec<MemberRow>,
     candidates: Vec<Candidate>,
     roles: [Role; 3],
+    mirror: Option<MirrorView>,
     error: String,
     notice: String,
 }
@@ -415,8 +467,10 @@ async fn settings_page(state: &Shared, user: User, repo: Repo, error: String, no
     .fetch_all(&state.db)
     .await?;
     let refs = state.git(repo.id).refs().await?;
+    let mirror = MirrorView::load(state, &repo).await?;
     render(RepoSettingsPage {
         user,
+        mirror,
         nav: RepoNav::new(&repo, Role::Maintain, "settings"),
         members,
         candidates,
@@ -455,6 +509,7 @@ pub struct RepoForm {
     #[serde(default)]
     protected_branches: String,
     pipelines_on_push: Option<String>,
+    prevent_outdated_deploys: Option<String>,
 }
 
 pub async fn update_repo(
@@ -469,6 +524,7 @@ pub async fn update_repo(
         default_branch: f.default_branch,
         protected_branches: f.protected_branches.split(',').map(str::to_string).collect(),
         pipelines_on_push: checked(&f.pipelines_on_push),
+        prevent_outdated_deploys: checked(&f.prevent_outdated_deploys),
     };
     if let Err(e) = crate::ops::update_repo(&state, &repo, settings).await? {
         return settings_page(&state, user, repo, e.into(), String::new()).await;
@@ -606,6 +662,142 @@ async fn after_member_change(state: &Shared, user: User, repo: Repo, notice: Str
         Some(_) => Ok(Redirect::to(&format!("/{}", repo.path())).into_response()),
         None => Ok(Redirect::to("/").into_response()),
     }
+}
+
+// ---------------------------------------------------------------- mirror
+
+#[derive(Deserialize)]
+pub struct MirrorForm {
+    #[serde(default)]
+    url: String,
+    branches: Option<String>,
+    #[serde(default)]
+    https_token: String,
+    clear_https_token: Option<String>,
+    #[serde(default)]
+    status_token: String,
+    clear_status_token: Option<String>,
+}
+
+/// A secret field: empty keeps the stored value, the Remove box clears it.
+fn secret_field(value: &str, clear: &Option<String>) -> Option<String> {
+    if checked(clear) {
+        Some(String::new())
+    } else if value.trim().is_empty() {
+        None
+    } else {
+        Some(value.trim().to_string())
+    }
+}
+
+/// Starts mirroring (administrators: the URL decides which server this one
+/// talks to) or changes a mirror's settings (maintainers).
+pub async fn save_mirror(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name)): Path<(String, String)>,
+    Form(f): Form<MirrorForm>,
+) -> AppResult<Response> {
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    let url = if f.url.trim().is_empty() { repo.mirror_url.clone().unwrap_or_default() } else { f.url.clone() };
+    if repo.mirror_url.as_deref() != Some(url.trim()) && !user.is_admin {
+        return Err(AppError::Forbidden);
+    }
+    let starting = !repo.is_mirror();
+    let input = crate::mirror::MirrorInput {
+        url,
+        branches: f.branches,
+        https_token: secret_field(&f.https_token, &f.clear_https_token),
+        status_token: secret_field(&f.status_token, &f.clear_status_token),
+    };
+    if let Err(e) = crate::mirror::configure(&state, &repo, input).await? {
+        return settings_page(&state, user, repo, e.into(), String::new()).await;
+    }
+    tracing::info!(repo = %repo.path(), by = %user.email, "mirror settings saved");
+    let repo = state.repo_by_id(repo.id).await?;
+    crate::mirror::request_sync(&state, repo.id);
+    let notice = if starting {
+        "This repository is now a mirror. Give its key (or token) read access on the upstream, then Sync now."
+    } else {
+        "Mirror settings saved."
+    };
+    settings_page(&state, user, repo, String::new(), notice.into()).await
+}
+
+#[derive(Deserialize)]
+pub struct SyncForm {
+    #[serde(default)]
+    back: String,
+}
+
+/// Fetches the upstream now (write access, like running a pipeline).
+pub async fn sync_mirror(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name)): Path<(String, String)>,
+    Form(f): Form<SyncForm>,
+) -> AppResult<Response> {
+    let (repo, role) = load_repo(&state, &user, &ns, &name, Role::Write).await?;
+    if !repo.is_mirror() {
+        return Err(bad("This repository is not a mirror."));
+    }
+    let result = crate::mirror::sync_for_pipeline(&state, &repo).await;
+    if f.back != "settings" || role < Role::Maintain {
+        // The overview shows the outcome (last sync, or its error).
+        return Ok(Redirect::to(&format!("/{}", repo.path())).into_response());
+    }
+    let repo = state.repo_by_id(repo.id).await?;
+    match result {
+        Ok(synced) => {
+            let notice = match synced.changed {
+                0 => "Up to date with the upstream: nothing new.".to_string(),
+                1 => "Up to date with the upstream: 1 branch or tag changed.".to_string(),
+                n => format!("Up to date with the upstream: {n} branches and tags changed."),
+            };
+            settings_page(&state, user, repo, String::new(), notice).await
+        }
+        Err(e) => settings_page(&state, user, repo, e, String::new()).await,
+    }
+}
+
+pub async fn forget_mirror_host(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name)): Path<(String, String)>,
+) -> AppResult<Response> {
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    crate::mirror::forget_host_key(&state, repo.id).await?;
+    tracing::warn!(repo = %repo.path(), by = %user.email, "mirror host key forgotten");
+    let notice = "Host key forgotten: the next sync pins the key the upstream presents.";
+    settings_page(&state, user, repo, String::new(), notice.into()).await
+}
+
+pub async fn new_mirror_secret(
+    State(state): State<Shared>,
+    CurrentUser(user): CurrentUser,
+    Path((ns, name)): Path<(String, String)>,
+) -> AppResult<Response> {
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    if !repo.is_mirror() {
+        return Err(bad("This repository is not a mirror."));
+    }
+    crate::mirror::new_webhook_secret(&state, repo.id).await?;
+    let notice = "New webhook secret: put it on the upstream's webhook, the old one no longer works.";
+    settings_page(&state, user, repo, String::new(), notice.into()).await
+}
+
+/// Turns a mirror into an ordinary repository that accepts pushes.
+pub async fn stop_mirror(
+    State(state): State<Shared>,
+    AdminUser(user): AdminUser,
+    Path((ns, name)): Path<(String, String)>,
+) -> AppResult<Response> {
+    let (repo, _) = load_repo(&state, &user, &ns, &name, Role::Maintain).await?;
+    crate::mirror::stop(&state, &repo).await?;
+    tracing::warn!(repo = %repo.path(), by = %user.email, "mirroring stopped");
+    let repo = state.repo_by_id(repo.id).await?;
+    let notice = "No longer a mirror: it accepts pushes again. Remove its key from the upstream.";
+    settings_page(&state, user, repo, String::new(), notice.into()).await
 }
 
 #[derive(Deserialize)]

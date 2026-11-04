@@ -5,7 +5,7 @@
 {% block crumbs %}{% include "repo_crumbs.html" %}<span class="sep">/</span><a href="/{{ nav.path }}/-/pipelines">Pipelines</a><span class="sep">/</span><span class="here">Run</span>{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>Run pipeline</h1><p class="lead">Runs <code>.gitlab-ci.yml</code> from the branch or tag you pick, with <code>CI_PIPELINE_SOURCE=web</code>.</p></div>
+  <div><h1>Run pipeline</h1><p class="lead">Runs <code>.gitlab-ci.yml</code> from the branch or tag you pick, with <code>CI_PIPELINE_SOURCE=web</code>.{% if nav.is_mirror() %} Pipe first fetches {{ nav.mirror }}, so the pipeline runs on its latest commit.{% endif %}</p></div>
 </div>
 {% if !error.is_empty() %}<div class="alert err">{% call ui::icon("failed") %}{% endcall %}<div>{{ error }}</div></div>{% endif %}
 {% if !notice.is_empty() %}<div class="alert info">{% call ui::icon("warning") %}{% endcall %}<div>{{ notice }}</div></div>{% endif %}

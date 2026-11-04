@@ -203,6 +203,7 @@ pub struct RepoSettings {
     /// Patterns; empty ones are dropped.
     pub protected_branches: Vec<String>,
     pub pipelines_on_push: bool,
+    pub prevent_outdated_deploys: bool,
 }
 
 impl RepoSettings {
@@ -212,6 +213,7 @@ impl RepoSettings {
             default_branch: repo.default_branch.clone(),
             protected_branches: repo.protected_branches.split(',').map(|p| p.trim().to_string()).collect(),
             pipelines_on_push: repo.pipelines_on_push,
+            prevent_outdated_deploys: repo.prevent_outdated_deploys,
         }
     }
 }
@@ -231,14 +233,15 @@ pub async fn update_repo(state: &AppState, repo: &Repo, s: RepoSettings) -> Chec
         return Ok(Err("A protected branch pattern cannot contain a comma."));
     }
     sqlx::query(
-        "UPDATE repos SET description = $2, default_branch = $3, protected_branches = $4, pipelines_on_push = $5 \
-         WHERE id = $1",
+        "UPDATE repos SET description = $2, default_branch = $3, protected_branches = $4, pipelines_on_push = $5, \
+         prevent_outdated_deploys = $6 WHERE id = $1",
     )
     .bind(repo.id)
     .bind(s.description.trim())
     .bind(&branch)
     .bind(protected.join(", "))
     .bind(s.pipelines_on_push)
+    .bind(s.prevent_outdated_deploys)
     .execute(&state.db)
     .await?;
     Ok(Ok(()))

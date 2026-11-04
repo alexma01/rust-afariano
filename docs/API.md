@@ -24,17 +24,48 @@ auth=(-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json")
 
 | Call | Role | Body / answer |
 |---|---|---|
-| `POST /repos` | admin | `{"namespace", "name", "description"?, "default_branch"?, "protected_branches"?: [..], "pipelines_on_push"?}` → `201` repository |
+| `POST /repos` | admin | `{"namespace", "name", "description"?, "default_branch"?, "protected_branches"?: [..], "pipelines_on_push"?, "mirror"?}` → `201` repository; `mirror` as in `PUT …/mirror` below |
 | `GET /repos/{ns}/{name}` | read | repository |
-| `PATCH /repos/{ns}/{name}` | maintain | any of `description`, `default_branch`, `protected_branches` (list, replaces), `pipelines_on_push` → repository |
+| `PATCH /repos/{ns}/{name}` | maintain | any of `description`, `default_branch`, `protected_branches` (list, replaces), `pipelines_on_push`, `prevent_outdated_deploys` → repository |
 
 A repository is `{"path", "description", "default_branch", "protected_branches",
-"pipelines_on_push", "role", "web_url", "http_url", "ssh_url"}`, where `role` is
-the caller's.
+"pipelines_on_push", "prevent_outdated_deploys", "mirror_url", "role", "web_url",
+"http_url", "ssh_url"}`, where `role` is the caller's and `mirror_url` is `null`
+unless the repository is a pull mirror.
 
 ```sh
 curl "${auth[@]}" -X POST $API/repos -d '{"namespace": "acme", "name": "site",
   "protected_branches": ["main", "staging"], "pipelines_on_push": false}'
+```
+
+## Pull mirrors
+
+A mirror copies a repository from another server and refuses pushes (README,
+*Code that lives elsewhere*). On a mirror, `POST …/pipelines` fetches the upstream
+first; if that fails, nothing starts and the answer is `502`.
+
+| Call | Role | Body / answer |
+|---|---|---|
+| `GET /repos/{ns}/{name}/mirror` | maintain | mirror |
+| `PUT /repos/{ns}/{name}/mirror` | maintain (admin to set or change `url`) | `{"url", "branches"?, "https_token"?, "status_token"?}` → mirror. Makes the repository a mirror, or changes its settings. A token left out stays; `""` removes it |
+| `DELETE /repos/{ns}/{name}/mirror` | admin | `204`: an ordinary repository again, its content kept |
+| `POST /repos/{ns}/{name}/mirror/sync` | write | fetches now → `{"changed", "synced_at"}`, or `502 {"message"}` with git's error and a hint |
+| `POST /repos/{ns}/{name}/mirror/secret` | maintain | a new webhook secret → `{"webhook_secret"}` |
+| `POST /repos/{ns}/{name}/mirror/hook` | none: signed | the upstream's webhook → `202`. Needs GitHub's `X-Hub-Signature-256` or Bitbucket's `X-Hub-Signature` (`sha256=` HMAC of the body with the secret) or GitLab's `X-Gitlab-Token`; every refusal is `404` |
+
+A mirror is `{"url", "upstream", "ssh_public_key", "host_keys", "branches",
+"has_https_token", "synced_at", "checked_at", "error", "webhook_url",
+"webhook_secret", "hook_at", "hook_error", "forge", "has_status_token",
+"status_at", "status_error"}`. `ssh_public_key` (SSH URLs only) goes on the
+upstream as a read-only deploy key or access key; `forge` is `GitHub`, `Bitbucket`
+or `null` (no commit statuses); `error`, `hook_error` and `status_error` say why
+the last sync, webhook call or status update failed.
+
+```sh
+curl "${auth[@]}" -X POST $API/repos -d '{"namespace": "devops", "name": "app",
+  "mirror": {"url": "git@bitbucket.org:team/app.git", "branches": "main, release/*"}}'
+curl -s "${auth[@]}" $API/repos/devops/app/mirror | jq -r .ssh_public_key   # add it on Bitbucket
+curl "${auth[@]}" -X POST $API/repos/devops/app/mirror/sync
 ```
 
 ## Members
