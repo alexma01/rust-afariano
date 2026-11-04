@@ -671,6 +671,7 @@ mod tests {
             .unwrap()
         };
         let read = page(Role::Read);
+        assert!(read.contains(r#"href="https://github.com/frank10gm/rust-afariano""#), "sidebar links the repository");
         assert!(!read.contains("/acme/web/-/pipelines/new"));
         assert!(!read.contains("/acme/web/-/settings"));
         let write = page(Role::Write);

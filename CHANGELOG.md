@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-11-04
+
+### Added
+
+- The sidebar links the project's repository on GitHub, with the running version
+  (`rust-afariano 0.6.1 on GitHub`); the URL is `repository` from Cargo.toml.
+
+### Changed
+
+- Release workflow: the macOS runner binary is built on `macos-26`; `macos-15` runners
+  never started the job for 0.6.0, whose macOS binary was built outside CI (see its
+  release notes).
+
 ## [0.6.0] - 2026-11-04
 
 ### Added

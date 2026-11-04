@@ -27,6 +27,9 @@ use crate::{api, git_http, runner_api};
 /// browsers fetch them again after an upgrade instead of using a cached copy.
 pub const ASSET_V: &str = env!("CARGO_PKG_VERSION");
 
+/// The project's source repository (`repository` in Cargo.toml), linked in the sidebar.
+pub const REPO_URL: &str = env!("CARGO_PKG_REPOSITORY");
+
 pub fn router(state: Shared) -> Router {
     let pages = Router::new()
         .route("/", get(repo::home))
