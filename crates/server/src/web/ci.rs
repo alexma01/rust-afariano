@@ -67,7 +67,9 @@ pub async fn pipelines(
     let mut rows: Vec<PipelineRow> = list
         .iter()
         .take(PER_PAGE as usize)
-        .map(|p| PipelineRow::new(p, &rp, p.created_by.and_then(|id| names.get(&id)).map(String::as_str)))
+        .map(|p| {
+            PipelineRow::new(p, &rp, p.created_by.and_then(|id| names.get(&id)).map(String::as_str)).for_repo(&repo)
+        })
         .collect();
     super::attach_stages(&state, &mut rows).await?;
     let refresh = rows.iter().any(PipelineRow::active);
@@ -199,7 +201,7 @@ async fn new_pipeline_page(
     vars.retain(|v| !v.key.is_empty() || !v.value.is_empty());
     let free_rows = if form_vars.is_empty() { 3 } else { vars.len() + 1 };
     while vars.len() < free_rows {
-        vars.push(PipelineVar { key: String::new(), value: String::new() });
+        vars.push(PipelineVar { key: String::new(), value: String::new(), secret: false });
     }
     render(NewPipelinePage {
         user,
@@ -229,16 +231,24 @@ pub async fn run_pipeline(
     let mut vars_from = None;
     let mut keys = Vec::new();
     let mut values = Vec::new();
+    // Row numbers of the ticked "secret" boxes (an unticked box sends nothing).
+    let mut secrets = Vec::new();
     for (k, v) in form {
         match k.as_str() {
             "ref" => target = v,
             "vars_from" => vars_from = Some(v),
             "var_key" => keys.push(v),
             "var_value" => values.push(v),
+            "var_secret" => secrets.extend(v.parse::<usize>()),
             _ => {}
         }
     }
-    let vars: Vec<PipelineVar> = keys.into_iter().zip(values).map(|(key, value)| PipelineVar { key, value }).collect();
+    let vars: Vec<PipelineVar> = keys
+        .into_iter()
+        .zip(values)
+        .enumerate()
+        .map(|(i, (key, value))| PipelineVar { key, value, secret: secrets.contains(&i) })
+        .collect();
     if ref_input_name(&target).is_empty() {
         let msg = "Enter a branch or tag.".to_string();
         return new_pipeline_page(&state, user, &repo, role, target, msg, String::new(), vars).await;
@@ -656,6 +666,7 @@ mod tests {
             pushed_at: None,
             mirror_url: None,
             prevent_outdated_deploys: true,
+            list_shows_variables: true,
         };
         let page = |role| {
             PipelinesPage {

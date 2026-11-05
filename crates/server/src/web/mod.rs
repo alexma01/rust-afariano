@@ -287,6 +287,19 @@ pub struct PipelineRow {
     pub duration: String,
     pub by: String,
     pub stages: Vec<StageDot>,
+    /// Variables the run was started with, in the order given.
+    pub vars: Vec<RowVar>,
+    /// List mode "variables": they replace the title (see `for_repo`).
+    pub vars_mode: bool,
+    /// Show the ref chip; in variables mode only when it is not the default branch.
+    pub show_ref: bool,
+}
+
+/// One run variable as the list shows it; a secret one stays hidden until the eye is clicked.
+pub struct RowVar {
+    pub key: String,
+    pub value: String,
+    pub secret: bool,
 }
 
 impl PipelineRow {
@@ -312,7 +325,25 @@ impl PipelineRow {
             duration,
             by: by.unwrap_or("").to_string(),
             stages: Vec::new(),
+            vars: p
+                .variables
+                .0
+                .iter()
+                .map(|v| RowVar { key: v.key.clone(), value: v.value.clone(), secret: v.secret })
+                .collect(),
+            vars_mode: false,
+            show_ref: true,
         }
+    }
+
+    /// Applies the repository's list setting: with variables to show, they replace the
+    /// commit title and hash, and the ref is shown only when it is not the default branch.
+    pub fn for_repo(mut self, repo: &Repo) -> Self {
+        if repo.list_shows_variables && !self.vars.is_empty() {
+            self.vars_mode = true;
+            self.show_ref = self.ref_is_tag || self.ref_name != repo.default_branch;
+        }
+        self
     }
 
     pub fn active(&self) -> bool {
@@ -446,7 +477,7 @@ pub fn clean_vars(vars: Vec<PipelineVar>) -> AppResult<Vec<PipelineVar>> {
         if !valid_var_key(&key) {
             return Err(bad(format!("invalid variable name `{key}` (letters, digits, _)")));
         }
-        out.push(PipelineVar { key, value: v.value });
+        out.push(PipelineVar { key, value: v.value, secret: v.secret });
     }
     Ok(out)
 }
@@ -506,6 +537,14 @@ mod tests {
         assert!(html.contains("href=\"#\""));
         assert!(html.contains("src=\"/n/r/-/raw/main/img.png\""));
         assert!(html.contains("href=\"/n/r/-/blob/main/docs/x.md\""));
+    }
+
+    #[test]
+    fn secret_flag_survives_clean_vars_and_defaults_to_false() {
+        let v = clean_vars(vec![PipelineVar { key: "A".into(), value: "1".into(), secret: true }]).unwrap();
+        assert!(v[0].secret);
+        let old: Vec<PipelineVar> = serde_json::from_str(r#"[{"key":"A","value":"1"}]"#).unwrap();
+        assert!(!old[0].secret);
     }
 
     #[test]

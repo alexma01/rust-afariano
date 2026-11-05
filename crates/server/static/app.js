@@ -181,6 +181,17 @@
     });
   }
 
+  // Secret run variables in the pipeline list: the eye shows or hides the value.
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-reveal]");
+    if (!btn) return;
+    var vv = btn.parentNode.querySelector(".vv[data-secret]");
+    if (!vv) return;
+    var shown = vv.getAttribute("data-shown") === "1";
+    vv.textContent = shown ? "••••••" : vv.getAttribute("data-secret");
+    vv.setAttribute("data-shown", shown ? "0" : "1");
+  });
+
   // Pages with running pipelines refresh themselves while visible.
   var refresh = document.querySelector("[data-refresh]");
   if (refresh) {

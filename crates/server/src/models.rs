@@ -40,10 +40,12 @@ pub struct Repo {
     pub mirror_url: Option<String>,
     /// Jobs with an environment do not run when a newer pipeline already deployed there.
     pub prevent_outdated_deploys: bool,
+    /// The pipeline list shows each run's variables instead of the commit title.
+    pub list_shows_variables: bool,
 }
 
 pub const REPO_COLS: &str = "id, namespace, name, description, default_branch, protected_branches, pipelines_on_push, \
-     created_at, pushed_at, mirror_url, prevent_outdated_deploys";
+     created_at, pushed_at, mirror_url, prevent_outdated_deploys, list_shows_variables";
 
 impl Repo {
     pub fn is_mirror(&self) -> bool {
@@ -71,6 +73,9 @@ impl Repo {
 pub struct PipelineVar {
     pub key: String,
     pub value: String,
+    /// Hidden in the pipeline list and masked in job logs. Older rows and API calls without it: false.
+    #[serde(default)]
+    pub secret: bool,
 }
 
 #[derive(Debug, Clone, FromRow)]
