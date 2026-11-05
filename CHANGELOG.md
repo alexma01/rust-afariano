@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] - 2026-11-05
+
+### Fixed
+
+- Pipeline graph: the status icon in each job pill is centred with the job name; it
+  sat 2.5px high, on the text baseline of its wrapper.
+
 ## [0.6.1] - 2026-11-04
 
 ### Added

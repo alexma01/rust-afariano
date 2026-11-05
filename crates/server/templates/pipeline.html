@@ -34,7 +34,7 @@
     <div class="jobs">
     {% for j in s.jobs %}
       <div class="job">
-        <span title="{{ j.label() }}">{% call ui::icon(j.vis) %}{% endcall %}</span>
+        <span class="st" title="{{ j.label() }}">{% call ui::icon(j.vis) %}{% endcall %}</span>
         <a class="name" href="{{ j.url }}" title="{{ j.name }}: {{ j.label() }}">{{ j.name }}</a>
         {% if !j.duration.is_empty() %}<span class="dur">{{ j.duration }}</span>{% endif %}
         {% if nav.can_write() && j.can_play %}<form method="post" action="{{ j.url }}/play"><button class="btn icon sm" type="submit" title="Run {{ j.name }}" aria-label="Run {{ j.name }}">{% call ui::i("play") %}{% endcall %}</button></form>{% endif %}
