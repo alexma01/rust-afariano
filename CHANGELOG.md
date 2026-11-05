@@ -29,6 +29,13 @@ stored with an optional `secret` flag; older pipelines have none. To roll back:
 `ALTER TABLE repos DROP COLUMN list_shows_variables;
 DELETE FROM _sqlx_migrations WHERE version = 5;`
 
+## [0.6.2] - 2026-11-05
+
+### Fixed
+
+- Pipeline graph: the status icon in each job pill is centred with the job name; it
+  sat 2.5px high, on the text baseline of its wrapper.
+
 ## [0.6.1] - 2026-11-04
 
 ### Added

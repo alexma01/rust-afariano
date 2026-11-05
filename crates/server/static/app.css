@@ -395,6 +395,7 @@ details.dropdown > summary::-webkit-details-marker { display: none; }
   background: var(--bg); border: 1px solid var(--line); border-radius: 999px;
 }
 .job:hover { border-color: var(--line-strong); box-shadow: 0 1px 3px rgba(38, 42, 36, .08); }
+.job .st { display: flex; flex: none; }
 .job .name { flex: 1; min-width: 0; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job .name:hover { text-decoration: none; color: var(--link); }
 .job .dur { color: var(--text-3); font-size: 12px; }
