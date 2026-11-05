@@ -97,7 +97,8 @@ jobs:
   macos:
     name: macOS runner (aarch64)
     needs: draft
-    runs-on: macos-15
+    # macos-15 runners never picked this job up on 2026-11-04 (three attempts).
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable

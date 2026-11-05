@@ -29,6 +29,19 @@ stored with an optional `secret` flag; older pipelines have none. To roll back:
 `ALTER TABLE repos DROP COLUMN list_shows_variables;
 DELETE FROM _sqlx_migrations WHERE version = 5;`
 
+## [0.6.1] - 2026-11-04
+
+### Added
+
+- The sidebar links the project's repository on GitHub, with the running version
+  (`rust-afariano 0.6.1 on GitHub`); the URL is `repository` from Cargo.toml.
+
+### Changed
+
+- Release workflow: the macOS runner binary is built on `macos-26`; `macos-15` runners
+  never started the job for 0.6.0, whose macOS binary was built outside CI (see its
+  release notes).
+
 ## [0.6.0] - 2026-11-04
 
 ### Added

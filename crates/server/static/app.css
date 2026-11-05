@@ -122,7 +122,8 @@ svg.i { width: 16px; height: 16px; flex: none; }
 .nav a.on::before { content: ""; position: absolute; left: -10px; top: 6px; bottom: 6px; width: 3px; border-radius: 0 3px 3px 0; background: var(--olive); }
 .nav a.on svg { color: var(--olive); }
 .side-sep { height: 1px; background: var(--line); margin: 10px 8px; }
-.side-foot { margin-top: auto; padding: 12px 8px 0; color: var(--text-3); font-size: 12px; }
+.side-foot { margin-top: auto; padding: 12px 8px 0; color: var(--text-3); font-size: 12px; line-height: 1.6; }
+.side-foot a { color: var(--text-2); }
 
 .scrim { display: none; }
 .main { min-width: 0; display: flex; flex-direction: column; }
