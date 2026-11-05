@@ -602,7 +602,7 @@ async fn job_spec(state: &AppState, job: &Job, runner: &Runner, token: &str) -> 
         // A secret run variable is masked in the job log like a masked project variable.
         vars.insert(
             v.key.clone(),
-            proto::Variable { key: v.key.clone(), value: v.value.clone(), file: false, masked: v.secret },
+            proto::Variable { key: v.key.clone(), value: v.value.clone(), file: false, masked: v.is_secret() },
         );
     }
 

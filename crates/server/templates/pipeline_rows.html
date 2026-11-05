@@ -9,7 +9,7 @@
       <td>
         <div class="two-line">
           {% if p.vars_mode %}
-          <span class="vars">{% for v in p.vars %}<span class="var"><b>{{ v.key }}</b>=<span class="vv"{% if v.secret %} data-secret="{{ v.value }}"{% endif %}>{% if v.secret %}••••••{% else %}{{ v.value }}{% endif %}</span>{% if v.secret %}<button type="button" class="eye" data-reveal title="Show or hide the value" aria-label="Show or hide the value of {{ v.key }}">{% call ui::i("eye") %}{% endcall %}</button>{% endif %}</span>{% endfor %}</span>
+          <span class="vars">{% for v in p.vars %}<span class="var"><b>{{ v.key }}</b>={% if v.hidden %}<span class="vv" title="Hidden value">••••••</span>{% else %}<span class="vv" title="{{ v.value }}">{{ v.value }}</span>{% endif %}</span>{% endfor %}</span>
           {% else %}
           <a class="cell-title truncate" href="{{ p.url }}">{% if p.title.is_empty() %}Pipeline #{{ p.iid }}{% else %}{{ p.title }}{% endif %}</a>
           {% endif %}
@@ -17,7 +17,7 @@
             <a href="{{ p.url }}">#{{ p.iid }}</a>
             {% if show_repo %}<a href="/{{ p.repo_path }}">{{ p.repo_path }}</a>{% endif %}
             {% if p.show_ref %}<span class="pill">{% if p.ref_is_tag %}{% call ui::i("tag") %}{% endcall %}{% else %}{% call ui::i("branch") %}{% endcall %}{% endif %}{{ p.ref_name }}</span>{% endif %}
-            {% if !p.vars_mode %}<span class="sha">{{ p.sha_short }}</span>{% endif %}
+            <span class="sha">{{ p.sha_short }}</span>
             <span>{{ p.trigger() }}</span>
           </span>
         </div>

@@ -8,15 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- The pipeline list shows the variables each run was started with (`KEY=value`) in
-  place of the commit title and hash, for pipelines that have any. The branch chip
-  appears only when the ref is not the default branch. Per repository, in
-  *Settings → General* (*Show variables in the pipeline list*, API
-  `list_shows_variables`), on by default; off brings back the commit title.
+- The pipeline list can show the variables each run was started with (`KEY=value`)
+  in place of the commit title, for pipelines that have any; the commit hash stays,
+  and the branch chip appears only when the ref is not the default branch. Per
+  repository, in *Settings → General* (*Show variables in the pipeline list*, API
+  `list_shows_variables`), off by default: everyone who can read the repository sees
+  the values.
 - A *Secret* box on each row of *Other variables* in *Run pipeline*, and
-  `"secret": true` on a variable of `POST …/pipelines`. A secret value shows as
-  `••••••` in the list, with an eye to reveal it, and is masked in job logs like a
-  masked project variable.
+  `"secret": true` on a variable of `POST …/pipelines`. A secret value (a single line
+  of 8 characters or more) shows as `••••••` in the list, is not in the page at all,
+  and is masked in job logs like a masked project variable. Values of pipelines
+  started before this release are hidden the same way, but not masked.
 
 ### Changed
 
@@ -24,8 +26,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Upgrading
 
-Migration 5 adds `repos.list_shows_variables` (default true). Run variables are
-stored with an optional `secret` flag; older pipelines have none. To roll back:
+Migration 5 adds `repos.list_shows_variables` (default false). Run variables are
+stored with a `secret` flag; older pipelines have none, and the list never shows
+their values. To roll back:
 `ALTER TABLE repos DROP COLUMN list_shows_variables;
 DELETE FROM _sqlx_migrations WHERE version = 5;`
 

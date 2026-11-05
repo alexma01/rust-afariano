@@ -90,7 +90,7 @@ Values cannot be read back through the API; maintainers can see them in the web 
 
 | Call | Role | Body / answer |
 |---|---|---|
-| `POST /repos/{ns}/{name}/pipelines` | write | `{"ref", "variables"?: [{"key", "value", "secret"?}]}` → `201 {"iid", "web_url"}`; a `secret` variable is hidden in the web pipeline list and masked in job logs |
+| `POST /repos/{ns}/{name}/pipelines` | write | `{"ref", "variables"?: [{"key", "value", "secret"?}]}` → `201 {"iid", "web_url"}`; `"secret": true` (a single line of 8 characters or more) hides the value in the web pipeline list and masks it in job logs |
 | `GET /repos/{ns}/{name}/pipelines/{iid}` | read | pipeline |
 | `POST /repos/{ns}/{name}/pipelines/{iid}/retry` | write | retries failed and canceled jobs → pipeline |
 | `POST /repos/{ns}/{name}/pipelines/{iid}/cancel` | write | → pipeline |
